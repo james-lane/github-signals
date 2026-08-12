@@ -1,0 +1,23 @@
+{
+  "name": "github-signals",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A terminal dashboard for GitHub team activity and repository health",
+  "type": "module",
+  "bin": {
+    "github-signals": "./dist/src/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/cli.js",
+    "test": "node --test 'dist/test/*.test.js'",
+    "check": "npm run build && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}

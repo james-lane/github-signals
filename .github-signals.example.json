@@ -1,0 +1,33 @@
+{
+  "hostname": "github.com",
+  "theme": "default",
+  "lookbackDays": 14,
+  "showContributingRepositories": false,
+  "historyRetentionDays": 90,
+  "engineers": [
+    {
+      "id": "octocat",
+      "name": "Mona Octocat"
+    },
+    {
+      "id": "hubot",
+      "name": "Hubot"
+    }
+  ],
+  "repositories": [
+    {
+      "name": "octo-org/core-service",
+      "priority": "owned"
+    },
+    {
+      "name": "octo-org/shared-library",
+      "priority": "contributing"
+    }
+  ],
+  "thresholds": {
+    "stalePrDays": 3,
+    "staleIssueDays": 14,
+    "reviewWaitHours": 24,
+    "workflowFailureCount": 1
+  }
+}

@@ -1,0 +1,8 @@
+# Local GitHub Signals data. These files can contain private repository names,
+# engineer identities, and cached enterprise activity; never commit them.
+.github-signals.json
+.github-signals-cache.json
+.github-signals-history.sqlite*
+
+node_modules/
+.DS_Store

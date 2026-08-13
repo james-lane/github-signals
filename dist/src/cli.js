@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // @ts-nocheck -- Incremental migration boundary for the stateful terminal UI.
-import { authStatus, fetchOpenPullRequests, fetchSignals, login, openEngineer, openPullRequest, openRepositoryMetric } from './github.js';
+import { authStatus, fetchOpenPullRequests, fetchSignals, isRenovateAuthor, login, openEngineer, openPullRequest, openRepositoryMetric } from './github.js';
 import { CACHE_FILE, CONFIG_FILE, engineerId, loadCache, loadConfig, repositoryName, saveCache, saveConfig, visibleRepositories } from './config.js';
 import { loadHistory, recordSnapshot } from './history.js';
 import { sanitizeTerminal } from './terminal.js';
@@ -80,6 +80,7 @@ class App {
         this.themeEditing = false;
         this.promptState = null;
         this.prView = null;
+        this.showRenovatePullRequests = true;
         setTheme(config.theme);
         this.tabs = this.history.length ? ['Overview', 'Engineers', 'Repositories', 'History', 'Settings'] : ['Overview', 'Engineers', 'Repositories', 'Settings'];
     }
@@ -130,6 +131,7 @@ class App {
             this.settings();
         this.line();
         this.line(dim('─'.repeat(width)));
+        const renovateToggle = (this.prView || this.currentView() === 'Repositories') ? `  v Renovate ${this.showRenovatePullRequests ? 'shown' : 'hidden'}` : '';
         const navigation = this.prView ? '↑/↓ pull request  Enter open on web  Esc repositories'
             : this.contentFocused
                 ? (this.currentView() === 'Repositories' ? '↑/↓ repo  ←/→ metric  Enter open  Esc nav'
@@ -137,7 +139,7 @@ class App {
                         : this.currentView() === 'Settings' ? (this.themeEditing ? '←/→ preview theme  Enter apply  Esc setting' : '↑/↓ setting  Enter edit  Esc nav')
                             : '↑/↓ engineer  Enter open  Esc nav')
                 : '←/→ views  Enter select';
-        this.line(this.message || dim(`${navigation}  r refresh  a add  d delete  p priority  l login  q quit`));
+        this.line(this.message || dim(`${navigation}${renovateToggle}  r refresh  a add  d delete  p priority  l login  q quit`));
         // macOS Terminal may retain saved lines even in the alternate screen. Clear
         // only the active alternate buffer's scrollback after each full redraw.
         process.stdout.write(`${A}3J`);
@@ -268,7 +270,7 @@ class App {
         });
     }
     repositories() {
-        this.line(bold('Repository health'));
+        this.line(`${bold('Repository health')}  ${this.showRenovatePullRequests ? dim('Renovate included') : yellow('Renovate hidden')}`);
         const terminalWidth = process.stdout.columns || 100;
         const metrics = [
             ['Open PRs', 8, 'openPrs'],
@@ -303,9 +305,9 @@ class App {
                 this.errorLines(cell(displayName, nameWidth), x.error);
             else {
                 this.line(row(displayName, {
-                    openPrs: x?.openPrs ?? '—',
-                    stalePrs: x?.stalePrs ?? '—',
-                    waitingReviews: x?.waitingReviews ?? '—',
+                    openPrs: this.showRenovatePullRequests ? (x?.openPrs ?? '—') : (x?.openPrsWithoutRenovate ?? '—'),
+                    stalePrs: this.showRenovatePullRequests ? (x?.stalePrs ?? '—') : (x?.stalePrsWithoutRenovate ?? '—'),
+                    waitingReviews: this.showRenovatePullRequests ? (x?.waitingReviews ?? '—') : (x?.waitingReviewsWithoutRenovate ?? '—'),
                     openIssues: x?.openIssues ?? '—',
                     staleIssues: x?.staleIssues ?? '—',
                     failedRuns: x?.failedRuns ?? '—',
@@ -321,10 +323,13 @@ class App {
             this.line(dim(`${hidden} contributing repositories hidden · enable them in Settings`));
     }
     pullRequestsView() {
-        const { repository, pullRequests, totalCount, selection, rateLimit } = this.prView;
+        const { repository, totalCount, rateLimit } = this.prView;
+        const pullRequests = this.prView.pullRequests.filter(pr => this.showRenovatePullRequests || !isRenovateAuthor(pr.author?.login));
+        this.prView.selection = Math.min(this.prView.selection, Math.max(0, pullRequests.length - 1));
+        const selection = this.prView.selection;
         this.line(bold(`Open pull requests · ${repository}`));
         if (!pullRequests.length) {
-            this.line(green('No open pull requests.'));
+            this.line(green(this.showRenovatePullRequests ? 'No open pull requests.' : 'No non-Renovate pull requests.'));
             return;
         }
         const pr = pullRequests[selection];
@@ -333,7 +338,8 @@ class App {
         const visibleRows = Math.min(8, Math.max(6, pullRequests.length));
         const listStart = Math.max(0, Math.min(selection - Math.floor(visibleRows / 2), pullRequests.length - visibleRows));
         const visiblePullRequests = pullRequests.slice(listStart, listStart + visibleRows);
-        this.line(dim(`${totalCount} open · showing ${pullRequests.length}${totalCount > pullRequests.length ? ' most recently updated' : ''}${rateLimit ? ` · API ${rateLimit.remaining} remaining` : ''}`));
+        const hiddenRenovate = this.prView.pullRequests.length - pullRequests.length;
+        this.line(dim(`${totalCount} open · showing ${pullRequests.length}${hiddenRenovate ? ` · ${hiddenRenovate} Renovate hidden` : ''}${totalCount > this.prView.pullRequests.length ? ' · most recently updated' : ''}${rateLimit ? ` · API ${rateLimit.remaining} remaining` : ''}`));
         this.line();
         const range = `${listStart + 1}–${Math.min(listStart + visibleRows, pullRequests.length)} of ${pullRequests.length}`;
         this.line(dim(`┌─ Pull requests · ${range} ${'─'.repeat(Math.max(0, listWidth - range.length - 19))}┐`));
@@ -745,8 +751,10 @@ class App {
                 this.moveSelection(-1);
         }
         if (key === '\u001b[B' && this.contentFocused && !this.themeEditing) {
-            if (this.prView)
-                this.prView.selection = Math.min(this.prView.pullRequests.length - 1, this.prView.selection + 1);
+            if (this.prView) {
+                const visibleCount = this.prView.pullRequests.filter(pr => this.showRenovatePullRequests || !isRenovateAuthor(pr.author?.login)).length;
+                this.prView.selection = Math.min(visibleCount - 1, this.prView.selection + 1);
+            }
             else if (this.currentView() === 'Settings')
                 this.settingsSelection = (this.settingsSelection + 1) % 9;
             else if (this.currentView() === 'History')
@@ -755,6 +763,12 @@ class App {
                 this.moveSelection(1);
         }
         this.message = '';
+        if (key === 'v' && (this.prView || this.currentView() === 'Repositories')) {
+            this.showRenovatePullRequests = !this.showRenovatePullRequests;
+            if (this.prView)
+                this.prView.selection = 0;
+            return this.render();
+        }
         if (this.prView && key !== '\r' && key !== '\n')
             return this.render();
         if (key === 'a')
@@ -770,7 +784,10 @@ class App {
         if (key === '\r' || key === '\n') {
             if (this.prView && this.prView.pullRequests.length)
                 return this.runAction(async () => {
-                    const pr = this.prView.pullRequests[this.prView.selection];
+                    const visiblePullRequests = this.prView.pullRequests.filter(pr => this.showRenovatePullRequests || !isRenovateAuthor(pr.author?.login));
+                    const pr = visiblePullRequests[this.prView.selection];
+                    if (!pr)
+                        return;
                     await openPullRequest(pr.url);
                     this.message = green(`Opened ${this.prView.repository}#${pr.number}.`);
                     this.render();

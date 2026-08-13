@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { engineerSignalsFromRepositories } from '../src/github.js';
+import { engineerSignalsFromRepositories, isRenovateAuthor } from '../src/github.js';
+test('recognizes Renovate pull request authors without hiding approval bots', () => {
+    assert.equal(isRenovateAuthor('renovate'), true);
+    assert.equal(isRenovateAuthor('renovate[bot]'), true);
+    assert.equal(isRenovateAuthor('Renovate'), true);
+    assert.equal(isRenovateAuthor('renovate-approve'), false);
+    assert.equal(isRenovateAuthor('developer'), false);
+});
 test('derives private repository engineer activity from repository nodes', () => {
     const activity = [{
             name: 'org/private-repo',

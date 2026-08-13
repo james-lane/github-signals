@@ -15,6 +15,7 @@ export declare function fetchOpenPullRequests(fullName: any, hostname: any, sign
     rateLimit: any;
     pullRequests: any;
 }>;
+export declare const isRenovateAuthor: (login: any) => boolean;
 export declare function engineerSignalsFromRepositories(engineers: any, activity: any, since: any): unknown[];
 export declare function fetchSignals(config: any, onProgress?: () => void, { signal }?: {}): Promise<{
     fetchedAt: string;

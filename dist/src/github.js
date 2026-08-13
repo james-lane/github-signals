@@ -154,6 +154,7 @@ export async function fetchOpenPullRequests(fullName, hostname, signal) {
     };
 }
 const ageDays = iso => (Date.now() - new Date(iso).getTime()) / 86400000;
+export const isRenovateAuthor = login => /^renovate(?:\[bot\])?$/i.test(login || '');
 const contributionCount = (groups, repositories) => {
     if (!repositories.length)
         return groups.reduce((sum, group) => sum + group.contributions.totalCount, 0);
@@ -212,6 +213,7 @@ function repositorySignal(config, fullName, repo) {
     const stalePrs = pulls.filter(pr => ageDays(pr.updatedAt) >= config.thresholds.stalePrDays).length;
     const waitingReviews = pulls.filter(pr => ageDays(pr.createdAt) * 24 >= config.thresholds.reviewWaitHours && pr.reviewDecision === 'REVIEW_REQUIRED').length;
     const staleIssues = issues.filter(issue => ageDays(issue.updatedAt) >= config.thresholds.staleIssueDays).length;
+    const nonRenovatePulls = pulls.filter(pr => !isRenovateAuthor(pr.author?.login));
     const ciState = repo.defaultBranchRef?.target?.statusCheckRollup?.state || 'UNKNOWN';
     return {
         name: fullName,
@@ -220,6 +222,9 @@ function repositorySignal(config, fullName, repo) {
         openPrs: repo.pullRequests.totalCount,
         stalePrs,
         waitingReviews,
+        openPrsWithoutRenovate: nonRenovatePulls.length,
+        stalePrsWithoutRenovate: nonRenovatePulls.filter(pr => ageDays(pr.updatedAt) >= config.thresholds.stalePrDays).length,
+        waitingReviewsWithoutRenovate: nonRenovatePulls.filter(pr => ageDays(pr.createdAt) * 24 >= config.thresholds.reviewWaitHours && pr.reviewDecision === 'REVIEW_REQUIRED').length,
         openIssues: repo.issues.totalCount,
         staleIssues,
         failedRuns: ['FAILURE', 'ERROR'].includes(ciState) ? 1 : 0,
@@ -246,7 +251,7 @@ async function repositorySignals(config, names, since, signal) {
           history(first: 100, since: ${JSON.stringify(from)}) { nodes { oid authors(first: 10) { nodes { user { login } } } } }
         } } }
         pullRequests(first: 100, states: OPEN) {
-          totalCount nodes { createdAt updatedAt reviewDecision }
+          totalCount nodes { createdAt updatedAt reviewDecision author { login } }
         }
         activityPullRequests: pullRequests(first: 50, states: [OPEN, CLOSED, MERGED], orderBy: { field: CREATED_AT, direction: DESC }) {
           nodes { id createdAt mergedAt author { login } latestReviews(first: 10) { nodes { submittedAt author { login } } } }

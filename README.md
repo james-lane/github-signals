@@ -34,6 +34,7 @@ On first launch, press `l` to run the normal `gh auth login` web flow. If you al
 - `a`: add an engineer or repository
 - `d`: remove an item from the Engineers or Repositories screen
 - `p`: toggle a repository between owned and contributing
+- `v` in Repositories or its PR view: show or hide Renovate-authored pull requests
 - `r`: refresh signals
 - `Esc`: cancel an in-progress refresh
 - `l`: authenticate with `gh`

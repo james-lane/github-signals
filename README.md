@@ -28,7 +28,9 @@ On first launch, press `l` to run the normal `gh auth login` web flow. If you al
 - `Esc`: return from a focused view to the main navigation
 - `↑` / `↓` in a table: select an engineer or repository
 - `←` / `→` in Repositories: select a metric column
+- `↑` / `↓` in History: move through the snapshot list and inspect metrics at that point
 - `Enter` in a table: open the selected profile, repository, or filtered metric page
+- `Enter` on a repository's Open PRs metric: inspect its pull requests in the terminal; use `↑` / `↓`, `Enter` to open on the web, and `Esc` to return
 - `a`: add an engineer or repository
 - `d`: remove an item from the Engineers or Repositories screen
 - `p`: toggle a repository between owned and contributing

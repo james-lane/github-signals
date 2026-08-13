@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // @ts-nocheck -- Incremental migration boundary for the stateful terminal UI.
-import { authStatus, fetchSignals, login, openEngineer, openRepositoryMetric } from './github.js';
+import { authStatus, fetchOpenPullRequests, fetchSignals, login, openEngineer, openPullRequest, openRepositoryMetric } from './github.js';
 import { CACHE_FILE, CONFIG_FILE, engineerId, loadCache, loadConfig, repositoryName, saveCache, saveConfig, visibleRepositories } from './config.js';
 import { loadHistory, recordSnapshot } from './history.js';
 import { sanitizeTerminal } from './terminal.js';
@@ -35,6 +35,18 @@ const strip = s => String(s).replace(/\x1b\[[0-9;]*m/g, '');
 const fit = (s, width) => strip(s).length <= width ? s : `${strip(s).slice(0, Math.max(0, width - 1))}…`;
 const cell = (value, width) => fit(String(value), width).padEnd(width);
 const engineerLabel = engineer => engineer.name && engineer.name !== engineerId(engineer) ? `${engineer.name} (@${engineerId(engineer)})` : `@${engineerId(engineer)}`;
+const elapsed = value => {
+    const milliseconds = Math.max(0, Date.now() - new Date(value).getTime());
+    const hours = Math.floor(milliseconds / 3600000);
+    if (hours < 1)
+        return '<1h';
+    if (hours < 48)
+        return `${hours}h`;
+    const days = Math.floor(hours / 24);
+    if (days < 14)
+        return `${days}d ${hours % 24}h`;
+    return `${Math.floor(days / 7)}w ${days % 7}d`;
+};
 const sparkline = values => {
     const bars = '▁▂▃▄▅▆▇█';
     if (!values.length)
@@ -62,10 +74,12 @@ class App {
         this.lastRefreshStartedAt = 0;
         this.selection = { 1: 0, 2: 0 };
         this.repositoryMetric = 0;
+        this.historySelection = Math.max(0, history.length - 1);
         this.contentFocused = false;
         this.settingsSelection = 0;
         this.themeEditing = false;
         this.promptState = null;
+        this.prView = null;
         setTheme(config.theme);
         this.tabs = this.history.length ? ['Overview', 'Engineers', 'Repositories', 'History', 'Settings'] : ['Overview', 'Engineers', 'Repositories', 'Settings'];
     }
@@ -109,18 +123,20 @@ class App {
         if (this.currentView() === 'Engineers')
             this.engineers();
         if (this.currentView() === 'Repositories')
-            this.repositories();
+            this.prView ? this.pullRequestsView() : this.repositories();
         if (this.currentView() === 'History')
             this.historyView();
         if (this.currentView() === 'Settings')
             this.settings();
         this.line();
         this.line(dim('─'.repeat(width)));
-        const navigation = this.contentFocused
-            ? (this.currentView() === 'Repositories' ? '↑/↓ repo  ←/→ metric  Enter open  Esc nav'
-                : this.currentView() === 'Settings' ? (this.themeEditing ? '←/→ preview theme  Enter apply  Esc setting' : '↑/↓ setting  Enter edit  Esc nav')
-                    : '↑/↓ engineer  Enter open  Esc nav')
-            : '←/→ views  Enter select';
+        const navigation = this.prView ? '↑/↓ pull request  Enter open on web  Esc repositories'
+            : this.contentFocused
+                ? (this.currentView() === 'Repositories' ? '↑/↓ repo  ←/→ metric  Enter open  Esc nav'
+                    : this.currentView() === 'History' ? '↑/↓ snapshot  Esc nav'
+                        : this.currentView() === 'Settings' ? (this.themeEditing ? '←/→ preview theme  Enter apply  Esc setting' : '↑/↓ setting  Enter edit  Esc nav')
+                            : '↑/↓ engineer  Enter open  Esc nav')
+                : '←/→ views  Enter select';
         this.line(this.message || dim(`${navigation}  r refresh  a add  d delete  p priority  l login  q quit`));
         // macOS Terminal may retain saved lines even in the alternate screen. Clear
         // only the active alternate buffer's scrollback after each full redraw.
@@ -214,14 +230,20 @@ class App {
     }
     historyView() {
         const snapshots = this.history;
+        this.historySelection = Math.min(this.historySelection, Math.max(0, snapshots.length - 1));
+        const selectedIndex = this.historySelection;
+        const selected = snapshots[selectedIndex];
+        const previousSnapshot = snapshots[selectedIndex - 1];
         this.line(bold(`History · ${snapshots.length} matching snapshots`));
         this.line(dim(`Rolling ${this.config.lookbackDays}-day signals · oldest ${new Date(snapshots[0].captured_at).toLocaleDateString()} · newest ${new Date(snapshots.at(-1).captured_at).toLocaleString()}`));
+        this.line(`${this.contentFocused ? cyan('●') : dim('○')} ${bold(new Date(selected.captured_at).toLocaleString())}  ${dim(`snapshot ${selectedIndex + 1} of ${snapshots.length}`)}`);
         this.line();
         const metric = (label, key, lowerIsBetter = false) => {
             const values = snapshots.map(item => item[key]);
-            const current = values.at(-1);
-            const previous = values.at(-2);
-            this.line(`${cell(label, 18)} ${cyan(sparkline(values).padEnd(30))}  ${String(current).padStart(4)} ${trend(current, previous, lowerIsBetter)}`);
+            const current = selected[key];
+            const previous = previousSnapshot?.[key];
+            const timeline = sparkline(values);
+            this.line(`${cell(label, 18)} ${cyan(timeline.padEnd(30))}  ${String(current).padStart(4)} ${trend(current, previous, lowerIsBetter)}`);
         };
         this.line(bold('Team activity'));
         metric('Commits', 'commits');
@@ -237,9 +259,12 @@ class App {
         this.line();
         this.line(bold('Recent snapshots'));
         this.line(dim(`${cell('Captured', 22)} ${cell('Commits', 9)} ${cell('PRs', 6)} ${cell('Reviews', 9)} ${cell('Attention', 10)}`));
-        snapshots.slice(-8).reverse().forEach(item => {
+        const windowStart = Math.max(0, Math.min(selectedIndex - 3, snapshots.length - 8));
+        snapshots.slice(windowStart, windowStart + 8).reverse().forEach(item => {
             const attention = item.stale_prs + item.waiting_reviews + item.stale_issues + item.ci_failures;
-            this.line(`${cell(new Date(item.captured_at).toLocaleString(), 22)} ${cell(item.commits, 9)} ${cell(item.pull_requests, 6)} ${cell(item.reviews, 9)} ${attention ? red(cell(attention, 10)) : green(cell(0, 10))}`);
+            const isSelected = item === selected && this.contentFocused;
+            const row = `${cell(`${isSelected ? '› ' : '  '}${new Date(item.captured_at).toLocaleString()}`, 22)} ${cell(item.commits, 9)} ${cell(item.pull_requests, 6)} ${cell(item.reviews, 9)} ${cell(attention, 10)}`;
+            this.line(isSelected ? bold(selectedRow(row)) : row);
         });
     }
     repositories() {
@@ -295,6 +320,69 @@ class App {
         if (hidden)
             this.line(dim(`${hidden} contributing repositories hidden · enable them in Settings`));
     }
+    pullRequestsView() {
+        const { repository, pullRequests, totalCount, selection, rateLimit } = this.prView;
+        this.line(bold(`Open pull requests · ${repository}`));
+        if (!pullRequests.length) {
+            this.line(green('No open pull requests.'));
+            return;
+        }
+        const pr = pullRequests[selection];
+        const terminalWidth = process.stdout.columns || 100;
+        const listWidth = Math.max(28, Math.min(54, Math.floor(terminalWidth * 0.38)));
+        this.line(dim(`${totalCount} open · showing ${pullRequests.length}${totalCount > pullRequests.length ? ' most recently updated' : ''}${rateLimit ? ` · API ${rateLimit.remaining} remaining` : ''}`));
+        this.line();
+        pullRequests.slice(Math.max(0, selection - 3), Math.max(0, selection - 3) + 7).forEach(item => {
+            const active = item === pr;
+            const flags = `${item.isDraft ? 'draft · ' : ''}${item.reviewDecision ? item.reviewDecision.toLowerCase().replaceAll('_', ' ') : 'review pending'}`;
+            const row = `${active ? '›' : ' '} #${item.number} ${fit(item.title, listWidth - 9)}  ${dim(flags)}`;
+            this.line(active ? selectedRow(row) : row);
+        });
+        this.line();
+        this.line(bold(`#${pr.number} ${pr.title}`));
+        this.line(`${cyan(`@${pr.author?.login || 'unknown'}`)} opened ${new Date(pr.createdAt).toLocaleString()} · updated ${new Date(pr.updatedAt).toLocaleString()}`);
+        this.line(`${pr.isDraft ? yellow('Draft') : green('Ready')} · ${pr.mergeable?.toLowerCase() || 'merge status unknown'} · ${pr.reviewDecision?.toLowerCase().replaceAll('_', ' ') || 'no review decision'}`);
+        this.line();
+        this.line(bold('Key metrics'));
+        const metrics = [
+            ['Age', elapsed(pr.createdAt)],
+            ['In review', pr.isDraft ? 'not yet' : elapsed(pr.createdAt)],
+            ['Commits', pr.commitCount],
+            ['Change', `+${pr.additions} / -${pr.deletions}`],
+            ['Files', pr.changedFiles],
+            ['Reviews', pr.reviews.length],
+            ['Comments', pr.commentCount],
+        ];
+        const metricCells = metrics.map(([label, value]) => `${dim(label)} ${cyan(String(value))}`);
+        let metricRow = '';
+        metricCells.forEach(metricCell => {
+            const next = `${metricRow ? `${dim('  │  ')}` : ''}${metricCell}`;
+            if (metricRow && strip(metricRow + next).length > terminalWidth - 2) {
+                this.line(metricRow);
+                metricRow = metricCell;
+            }
+            else
+                metricRow += next;
+        });
+        if (metricRow)
+            this.line(metricRow);
+        if (pr.labels.length)
+            this.line(`Labels: ${pr.labels.map(label => cyan(label)).join(', ')}`);
+        if (pr.assignees.length)
+            this.line(`Assignees: ${pr.assignees.map(login => `@${login}`).join(', ')}`);
+        if (pr.requestedReviewers.length)
+            this.line(`Review requested: ${pr.requestedReviewers.map(login => `@${login}`).join(', ')}`);
+        if (pr.reviews.length)
+            this.line(`Latest reviews: ${pr.reviews.map(review => `${review.author?.login ? `@${review.author.login}` : 'unknown'} ${review.state.toLowerCase()}`).join(' · ')}`);
+        this.line();
+        this.line(bold(`Commits · ${pr.commitCount}`));
+        pr.commits.slice(-8).forEach(commit => {
+            const authors = [...new Set(commit.authors.nodes.map(author => author.user?.login ? `@${author.user.login}` : author.name).filter(Boolean))].join(', ');
+            this.line(`${dim(commit.oid.slice(0, 7))} ${fit(commit.messageHeadline, Math.max(20, terminalWidth - authors.length - 14))}  ${cyan(authors || 'unknown')}`);
+        });
+        if (pr.commitCount > pr.commits.length)
+            this.line(dim(`${pr.commitCount - pr.commits.length} earlier commits not loaded`));
+    }
     sortedRepositories() {
         return [...visibleRepositories(this.config)].sort((a, b) => {
             if (a.priority !== b.priority)
@@ -326,6 +414,14 @@ class App {
         }
         else if (this.currentView() === 'Repositories') {
             const metric = ['repository', 'openPrs', 'stalePrs', 'waitingReviews', 'openIssues', 'staleIssues', 'failedRuns'][this.repositoryMetric];
+            if (metric === 'openPrs') {
+                this.message = cyan(`Loading open pull requests for ${repositoryName(selected)}…`);
+                this.render();
+                const result = await fetchOpenPullRequests(repositoryName(selected), this.config.hostname);
+                this.prView = { repository: repositoryName(selected), ...result, selection: 0 };
+                this.message = '';
+                return this.render();
+            }
             await openRepositoryMetric(repositoryName(selected), this.config.hostname, metric, this.config.thresholds);
             this.message = green(`Opened ${repositoryName(selected)} · ${metric}.`);
         }
@@ -591,6 +687,11 @@ class App {
             return;
         if (key === 'q')
             return this.quit();
+        if (key === '\u001b' && this.prView) {
+            this.prView = null;
+            this.message = '';
+            return this.render();
+        }
         if (key === '\u001b' && this.contentFocused) {
             if (this.currentView() === 'Settings' && this.themeEditing) {
                 this.themeEditing = false;
@@ -604,7 +705,8 @@ class App {
         if (key === '\t' && !this.contentFocused)
             this.tab = (this.tab + 1) % this.tabs.length;
         if (key === '\u001b[C') {
-            if (this.contentFocused && this.currentView() === 'Repositories')
+            if (this.prView) { /* PR drill-down uses vertical list navigation. */ }
+            else if (this.contentFocused && this.currentView() === 'Repositories')
                 this.repositoryMetric = Math.min(6, this.repositoryMetric + 1);
             else if (this.contentFocused && this.currentView() === 'Settings' && this.themeEditing)
                 return this.runAction(() => this.cycleTheme(1));
@@ -612,7 +714,8 @@ class App {
                 this.tab = (this.tab + 1) % this.tabs.length;
         }
         if (key === '\u001b[D') {
-            if (this.contentFocused && this.currentView() === 'Repositories')
+            if (this.prView) { /* PR drill-down uses vertical list navigation. */ }
+            else if (this.contentFocused && this.currentView() === 'Repositories')
                 this.repositoryMetric = Math.max(0, this.repositoryMetric - 1);
             else if (this.contentFocused && this.currentView() === 'Settings' && this.themeEditing)
                 return this.runAction(() => this.cycleTheme(-1));
@@ -620,18 +723,28 @@ class App {
                 this.tab = (this.tab + this.tabs.length - 1) % this.tabs.length;
         }
         if (key === '\u001b[A' && this.contentFocused && !this.themeEditing) {
-            if (this.currentView() === 'Settings')
+            if (this.prView)
+                this.prView.selection = Math.max(0, this.prView.selection - 1);
+            else if (this.currentView() === 'Settings')
                 this.settingsSelection = (this.settingsSelection + 8) % 9;
+            else if (this.currentView() === 'History')
+                this.historySelection = Math.min(this.history.length - 1, this.historySelection + 1);
             else
                 this.moveSelection(-1);
         }
         if (key === '\u001b[B' && this.contentFocused && !this.themeEditing) {
-            if (this.currentView() === 'Settings')
+            if (this.prView)
+                this.prView.selection = Math.min(this.prView.pullRequests.length - 1, this.prView.selection + 1);
+            else if (this.currentView() === 'Settings')
                 this.settingsSelection = (this.settingsSelection + 1) % 9;
+            else if (this.currentView() === 'History')
+                this.historySelection = Math.max(0, this.historySelection - 1);
             else
                 this.moveSelection(1);
         }
         this.message = '';
+        if (this.prView && key !== '\r' && key !== '\n')
+            return this.render();
         if (key === 'a')
             return this.runAction(() => this.add());
         if (key === 'd')
@@ -643,7 +756,14 @@ class App {
         if (key === 'l')
             return this.runAction(() => this.doLogin());
         if (key === '\r' || key === '\n') {
-            if (!this.contentFocused && ((this.currentView() === 'Engineers' || this.currentView() === 'Repositories') ? this.selectableItems().length : this.currentView() === 'Settings')) {
+            if (this.prView && this.prView.pullRequests.length)
+                return this.runAction(async () => {
+                    const pr = this.prView.pullRequests[this.prView.selection];
+                    await openPullRequest(pr.url);
+                    this.message = green(`Opened ${this.prView.repository}#${pr.number}.`);
+                    this.render();
+                });
+            if (!this.contentFocused && ((this.currentView() === 'Engineers' || this.currentView() === 'Repositories') ? this.selectableItems().length : (this.currentView() === 'Settings' || (this.currentView() === 'History' && this.history.length)))) {
                 this.contentFocused = true;
                 return this.render();
             }

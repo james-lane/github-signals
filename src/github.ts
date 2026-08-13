@@ -98,6 +98,10 @@ export function openRepositoryMetric(fullName, hostname, metric, thresholds) {
   return openUrl(pages[metric] || base);
 }
 
+export function openPullRequest(url) {
+  return openUrl(url);
+}
+
 async function api(hostname, endpoint, fields = {}, signal) {
   const args = ['api', '--hostname', hostname, endpoint, '--method', 'GET'];
   for (const [key, value] of Object.entries(fields)) args.push('-f', `${key}=${value}`);
@@ -108,6 +112,49 @@ async function api(hostname, endpoint, fields = {}, signal) {
 async function graphql(hostname, query, signal) {
   const { stdout } = await runGh(['api', '--hostname', hostname, 'graphql', '-f', `query=${query}`], { signal });
   return JSON.parse(stdout);
+}
+
+export async function fetchOpenPullRequests(fullName, hostname, signal) {
+  const [owner, name] = fullName.split('/');
+  const query = `query {
+    repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) {
+      pullRequests(first: 50, states: OPEN, orderBy: { field: UPDATED_AT, direction: DESC }) {
+        totalCount
+        nodes {
+          number title body createdAt updatedAt isDraft url additions deletions changedFiles
+          mergeable reviewDecision
+          author { login }
+          labels(first: 10) { nodes { name } }
+          assignees(first: 10) { nodes { login } }
+          reviewRequests(first: 10) { nodes { requestedReviewer { ... on User { login } ... on Team { name } } } }
+          comments { totalCount }
+          commits(first: 50) {
+            totalCount
+            nodes { commit { oid committedDate messageHeadline authors(first: 10) { nodes { name user { login } } } } }
+          }
+          latestReviews(first: 20) { nodes { state submittedAt author { login } } }
+        }
+      }
+    }
+    rateLimit { cost remaining resetAt }
+  }`;
+  const result = await graphql(hostname, query, signal);
+  const connection = result.data?.repository?.pullRequests;
+  if (!connection) throw new Error('Repository not found or not accessible.');
+  return {
+    totalCount: connection.totalCount,
+    rateLimit: result.data.rateLimit,
+    pullRequests: connection.nodes.map(pr => ({
+      ...pr,
+      commits: pr.commits.nodes.map(node => node.commit),
+      commitCount: pr.commits.totalCount,
+      reviews: pr.latestReviews.nodes,
+      labels: pr.labels.nodes.map(label => label.name),
+      assignees: pr.assignees.nodes.map(user => user.login),
+      requestedReviewers: pr.reviewRequests.nodes.map(request => request.requestedReviewer?.login || request.requestedReviewer?.name).filter(Boolean),
+      commentCount: pr.comments.totalCount,
+    })),
+  };
 }
 
 const ageDays = iso => (Date.now() - new Date(iso).getTime()) / 86400000;

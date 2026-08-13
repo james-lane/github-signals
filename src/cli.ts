@@ -310,15 +310,26 @@ class App {
     }
     const pr = pullRequests[selection];
     const terminalWidth = process.stdout.columns || 100;
-    const listWidth = Math.max(28, Math.min(54, Math.floor(terminalWidth * 0.38)));
+    const listWidth = Math.max(28, terminalWidth - 4);
+    const visibleRows = Math.min(8, Math.max(6, pullRequests.length));
+    const listStart = Math.max(0, Math.min(selection - Math.floor(visibleRows / 2), pullRequests.length - visibleRows));
+    const visiblePullRequests = pullRequests.slice(listStart, listStart + visibleRows);
     this.line(dim(`${totalCount} open · showing ${pullRequests.length}${totalCount > pullRequests.length ? ' most recently updated' : ''}${rateLimit ? ` · API ${rateLimit.remaining} remaining` : ''}`));
     this.line();
-    pullRequests.slice(Math.max(0, selection - 3), Math.max(0, selection - 3) + 7).forEach(item => {
+    const range = `${listStart + 1}–${Math.min(listStart + visibleRows, pullRequests.length)} of ${pullRequests.length}`;
+    this.line(dim(`┌─ Pull requests · ${range} ${'─'.repeat(Math.max(0, listWidth - range.length - 19))}┐`));
+    visiblePullRequests.forEach(item => {
       const active = item === pr;
       const flags = `${item.isDraft ? 'draft · ' : ''}${item.reviewDecision ? item.reviewDecision.toLowerCase().replaceAll('_', ' ') : 'review pending'}`;
-      const row = `${active ? '›' : ' '} #${item.number} ${fit(item.title, listWidth - 9)}  ${dim(flags)}`;
-      this.line(active ? selectedRow(row) : row);
+      const prefix = `${active ? '›' : ' '} #${item.number} `;
+      const flagWidth = Math.min(24, flags.length);
+      const titleWidth = Math.max(8, listWidth - prefix.length - flagWidth - 2);
+      const row = `${prefix}${cell(item.title, titleWidth)}  ${fit(flags, flagWidth).padEnd(flagWidth)}`;
+      const content = active ? selectedRow(cell(row, listWidth)) : cell(row, listWidth);
+      this.line(`${dim('│')} ${content} ${dim('│')}`);
     });
+    for (let index = visiblePullRequests.length; index < visibleRows; index++) this.line(`${dim('│')} ${' '.repeat(listWidth)} ${dim('│')}`);
+    this.line(dim(`└${'─'.repeat(listWidth + 2)}┘`));
     this.line();
     this.line(bold(`#${pr.number} ${pr.title}`));
     this.line(`${cyan(`@${pr.author?.login || 'unknown'}`)} opened ${new Date(pr.createdAt).toLocaleString()} · updated ${new Date(pr.updatedAt).toLocaleString()}`);

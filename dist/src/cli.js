@@ -120,9 +120,12 @@ class App {
     line(text = '') { process.stdout.write(`${fit(sanitizeTerminal(text), process.stdout.columns || 100)}${A}K\n`); }
     footer(text) {
         const width = process.stdout.columns || 100;
+        // Avoid the terminal's final column: writing into it can trigger auto-wrap
+        // and cause the last version character to be replaced during redraw.
+        const usableWidth = Math.max(1, width - 2);
         const version = dim(`v${APP_VERSION}`);
-        const left = fit(text, Math.max(1, width - strip(version).length - 1));
-        this.line(`${left}${' '.repeat(Math.max(1, width - strip(left).length - strip(version).length))}${version}`);
+        const left = fit(text, Math.max(1, usableWidth - strip(version).length - 1));
+        this.line(`${left}${' '.repeat(Math.max(1, usableWidth - strip(left).length - strip(version).length))}${version}`);
     }
     errorLines(label, error) {
         const width = Math.max(40, process.stdout.columns || 100);

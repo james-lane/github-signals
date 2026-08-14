@@ -257,12 +257,31 @@ async function engineerSignals(config, names, since, signal) {
                 const c = user.contributionsCollection;
                 const allowed = new Set(config.repositories.map(repositoryName).map(name => name.toLowerCase()));
                 const recentPulls = user.pullRequests.nodes.filter(pr => pr.createdAt >= from && (!allowed.size || allowed.has(pr.repository.nameWithOwner.toLowerCase())));
+                const repositoryActivity = new Map();
+                const addContributions = (groups, key) => groups.forEach(group => {
+                    const name = group.repository.nameWithOwner;
+                    if (allowed.size && !allowed.has(name.toLowerCase()))
+                        return;
+                    if (!repositoryActivity.has(name))
+                        repositoryActivity.set(name, { name, commits: 0, pullRequests: 0, merged: 0, reviews: 0, activeDays: 0 });
+                    repositoryActivity.get(name)[key] += group.contributions.totalCount;
+                });
+                addContributions(c.commitContributionsByRepository, 'commits');
+                addContributions(c.pullRequestContributionsByRepository, 'pullRequests');
+                addContributions(c.pullRequestReviewContributionsByRepository, 'reviews');
+                recentPulls.filter(pr => pr.mergedAt).forEach(pr => {
+                    const name = pr.repository.nameWithOwner;
+                    if (!repositoryActivity.has(name))
+                        repositoryActivity.set(name, { name, commits: 0, pullRequests: 0, merged: 0, reviews: 0, activeDays: 0 });
+                    repositoryActivity.get(name).merged += 1;
+                });
                 engineers.push({
                     login: loginName,
                     commits: contributionCount(c.commitContributionsByRepository, config.repositories),
                     pullRequests: contributionCount(c.pullRequestContributionsByRepository, config.repositories),
                     reviews: contributionCount(c.pullRequestReviewContributionsByRepository, config.repositories),
                     merged: recentPulls.filter(pr => pr.mergedAt).length,
+                    repositories: [...repositoryActivity.values()],
                 });
             });
         }
@@ -317,7 +336,7 @@ async function repositorySignals(config, names, since, signal) {
         visibility isArchived
         defaultBranchRef { name target { ... on Commit {
           statusCheckRollup { state }
-          history(first: 100, since: ${JSON.stringify(from)}) { nodes { oid authors(first: 10) { nodes { user { login } } } } }
+          history(first: 100, since: ${JSON.stringify(from)}) { nodes { oid committedDate authors(first: 10) { nodes { user { login } } } } }
         } } }
         pullRequests(first: 100, states: OPEN) {
           totalCount nodes { createdAt updatedAt reviewDecision author { login } }
@@ -355,8 +374,17 @@ export function engineerSignalsFromRepositories(engineers, activity, since) {
     const from = `${since}T00:00:00Z`;
     const byLogin = new Map(engineers.map(engineer => {
         const login = engineerId(engineer);
-        return [login.toLowerCase(), { login, commits: 0, pullRequests: 0, reviews: 0, merged: 0, reviewedPulls: new Set() }];
+        return [login.toLowerCase(), { login, commits: 0, pullRequests: 0, reviews: 0, merged: 0, reviewedPulls: new Set(), repositoryActivity: new Map() }];
     }));
+    const repositorySignal = (engineer, repository) => {
+        if (!engineer.repositoryActivity.has(repository))
+            engineer.repositoryActivity.set(repository, {
+                name: repository, commits: 0, pullRequests: 0, merged: 0, reviews: 0, activeDates: new Set(),
+            });
+        return engineer.repositoryActivity.get(repository);
+    };
+    const markActive = (focus, date) => { if (date)
+        focus.activeDates.add(date.slice(0, 10)); };
     for (const repo of activity) {
         for (const commit of repo.commits) {
             const credited = new Set();
@@ -364,27 +392,44 @@ export function engineerSignalsFromRepositories(engineers, activity, since) {
                 const signal = byLogin.get(author.user?.login?.toLowerCase());
                 if (signal && !credited.has(signal.login)) {
                     signal.commits += 1;
+                    const focus = repositorySignal(signal, repo.name);
+                    focus.commits += 1;
+                    markActive(focus, commit.committedDate);
                     credited.add(signal.login);
                 }
             }
         }
         for (const pr of repo.pullRequests) {
             const author = byLogin.get(pr.author?.login?.toLowerCase());
-            if (author && pr.createdAt >= from)
+            if (author && pr.createdAt >= from) {
                 author.pullRequests += 1;
-            if (author && pr.mergedAt >= from)
+                const focus = repositorySignal(author, repo.name);
+                focus.pullRequests += 1;
+                markActive(focus, pr.createdAt);
+            }
+            if (author && pr.mergedAt >= from) {
                 author.merged += 1;
+                const focus = repositorySignal(author, repo.name);
+                focus.merged += 1;
+                markActive(focus, pr.mergedAt);
+            }
             for (const review of pr.reviews.nodes) {
                 const reviewer = byLogin.get(review.author?.login?.toLowerCase());
                 const reviewKey = `${repo.name}:${pr.id}`;
                 if (reviewer && review.submittedAt >= from && !reviewer.reviewedPulls.has(reviewKey)) {
                     reviewer.reviews += 1;
                     reviewer.reviewedPulls.add(reviewKey);
+                    const focus = repositorySignal(reviewer, repo.name);
+                    focus.reviews += 1;
+                    markActive(focus, review.submittedAt);
                 }
             }
         }
     }
-    return [...byLogin.values()].map(({ reviewedPulls, ...signal }) => signal);
+    return [...byLogin.values()].map(({ reviewedPulls, repositoryActivity, ...signal }) => ({
+        ...signal,
+        repositories: [...repositoryActivity.values()].map(({ activeDates, ...focus }) => ({ ...focus, activeDays: activeDates.size })),
+    }));
 }
 export async function fetchSignals(config, onProgress = () => { }, { signal } = {}) {
     const since = new Date(Date.now() - config.lookbackDays * 86400000).toISOString().slice(0, 10);

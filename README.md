@@ -78,6 +78,8 @@ Legacy username strings remain supported; their ID is also used as their display
 
 Engineer activity includes default-branch commits, opened and merged pull requests, and reviewed pull requests over a configurable lookback. These counts are read directly from the repositories, so private organization activity is included when the authenticated account can access it. Repository health includes open/stale pull requests, pull requests whose GitHub review decision remains required beyond the configured wait threshold, open/stale issues, and the latest default-branch CI status.
 
+The highlighted engineer also shows a system-focus breakdown by repository: focus share, active days, commits, pull requests, merges, reviews, owned-repository share, and primary-system concentration. Focus uses a transparent activity weighting of commit `1`, pull request `3`, merge `2`, and review `2`. It describes where visible work happened, not hours worked or individual performance. Successful snapshots retain this repository breakdown so the primary-system share can be shown as a trend after new focus-aware snapshots have accumulated.
+
 Engineer and repository health are fetched together in small GraphQL batches. Refreshes run only when requested by the user, never poll in the background, and the overview shows the remaining GraphQL allowance and reset time.
 
 Repository activity queries use deliberately small, sequential batches with a short pause between them. Review activity uses each pull request's latest unique reviews, avoiding high-cost nested review histories and GitHub GraphQL resource-limit failures.

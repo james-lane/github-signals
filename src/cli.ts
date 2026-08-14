@@ -2,7 +2,7 @@
 // @ts-nocheck -- Incremental migration boundary for the stateful terminal UI.
 import { authStatus, fetchOpenPullRequests, fetchSignals, fetchWorkflowRunJobs, isRenovateAuthor, login, openEngineer, openGitHubUrl, openPullRequest, openRepositoryMetric } from './github.js';
 import { CACHE_FILE, CONFIG_FILE, engineerId, loadCache, loadConfig, repositoryName, saveCache, saveConfig, visibleRepositories } from './config.js';
-import { HISTORY_FILE, loadCiRuns, loadHistory, recordCiRuns, recordSnapshot } from './history.js';
+import { HISTORY_FILE, loadCiRuns, loadEngineerFocusHistory, loadHistory, recordCiRuns, recordSnapshot } from './history.js';
 import { sanitizeTerminal } from './terminal.js';
 
 const A = '\x1b[';
@@ -58,6 +58,7 @@ const percentile = (values, percentileValue) => {
   if (!sorted.length) return null;
   return sorted[Math.min(sorted.length - 1, Math.ceil(percentileValue * sorted.length) - 1)];
 };
+const focusScore = item => (item.commits || 0) + (item.pullRequests || 0) * 3 + (item.merged || 0) * 2 + (item.reviews || 0) * 2;
 const sparkline = values => {
   const bars = '▁▂▃▄▅▆▇█';
   if (!values.length) return dim('no history');
@@ -71,11 +72,12 @@ const trend = (current, previous, lowerIsBetter = false) => {
 };
 
 class App {
-  constructor(config, cache, auth, history = [], ciRuns = []) {
+  constructor(config, cache, auth, history = [], ciRuns = [], focusHistory = []) {
     this.config = config;
     this.data = cache;
     this.auth = auth;
     this.history = history;
+    this.focusHistory = focusHistory;
     this.tab = 0;
     this.message = '';
     this.busy = false;
@@ -264,12 +266,16 @@ class App {
   }
 
   engineers() {
-    this.line(bold(`Engineer activity · last ${this.config.lookbackDays} days`));
+    this.line(bold(`Engineer activity and system focus · last ${this.config.lookbackDays} days`));
     const labels = this.config.engineers.map(engineerLabel);
     const engineerWidth = Math.max(25, Math.min(Math.max(8, ...labels.map(label => label.length + 2)), (process.stdout.columns || 100) - 39));
     this.selection[1] = Math.min(this.selection[1], Math.max(0, this.config.engineers.length - 1));
-    this.line(dim(`${cell('Engineer', engineerWidth)}  ${cell('Commits', 8)}  ${cell('PRs', 5)}  ${cell('Merged', 7)}  Reviews`));
-    this.config.engineers.forEach((engineer, index) => {
+    const engineerRows = Math.max(3, Math.min(8, (process.stdout.rows || 40) - 20, this.config.engineers.length));
+    const engineerStart = Math.max(0, Math.min(this.selection[1] - Math.floor(engineerRows / 2), this.config.engineers.length - engineerRows));
+    const engineerEnd = Math.min(this.config.engineers.length, engineerStart + engineerRows);
+    this.line(dim(`${cell(`Engineer · ${this.config.engineers.length ? `${engineerStart + 1}–${engineerEnd} of ${this.config.engineers.length}` : '0'}`, engineerWidth)}  ${cell('Commits', 8)}  ${cell('PRs', 5)}  ${cell('Merged', 7)}  Reviews`));
+    this.config.engineers.slice(engineerStart, engineerEnd).forEach((engineer, visibleIndex) => {
+      const index = engineerStart + visibleIndex;
       const id = engineerId(engineer);
       const selected = this.contentFocused && index === this.selection[1];
       const label = `${selected ? '›' : ' '} ${engineerLabel(engineer)}`;
@@ -281,6 +287,45 @@ class App {
       }
     });
     if (!this.config.engineers.length) this.line(dim('No engineers configured. Press a to add one.'));
+    const selectedEngineer = this.config.engineers[this.selection[1]];
+    const selectedSignal = selectedEngineer && this.data?.engineers?.find(value => value.login === engineerId(selectedEngineer));
+    if (selectedSignal && !selectedSignal.error) this.engineerFocus(selectedEngineer, selectedSignal, engineerRows);
+  }
+
+  engineerFocus(engineer, signal, engineerRows) {
+    this.line();
+    const scored = (signal.repositories || []).map(repository => ({ ...repository, score: focusScore(repository) }))
+      .filter(repository => repository.score > 0).sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+    this.line(bold(`System focus · ${engineer.name || `@${signal.login}`}`));
+    if (!scored.length) {
+      this.line(dim('No repository-level focus data cached yet. Press r to refresh.'));
+      return;
+    }
+    const total = scored.reduce((sum, repository) => sum + repository.score, 0);
+    const priorities = new Map(this.config.repositories.map(repository => [repositoryName(repository), repository.priority]));
+    const owned = scored.filter(repository => priorities.get(repository.name) === 'owned').reduce((sum, repository) => sum + repository.score, 0);
+    const primaryShare = Math.round(scored[0].score / total * 100);
+    const ownedShare = Math.round(owned / total * 100);
+    const concentration = primaryShare >= 75 ? 'high focus' : primaryShare >= 50 ? 'moderate focus' : scored.length >= 6 && primaryShare < 30 ? 'broadly distributed' : 'shared focus';
+    const historyBySnapshot = new Map();
+    this.focusHistory.filter(row => row.login.toLowerCase() === signal.login.toLowerCase()).forEach(row => {
+      if (!historyBySnapshot.has(row.captured_at)) historyBySnapshot.set(row.captured_at, []);
+      historyBySnapshot.get(row.captured_at).push(focusScore({ commits: row.commits, pullRequests: row.pull_requests, merged: row.merged, reviews: row.reviews }));
+    });
+    const concentrationTrend = [...historyBySnapshot.values()].map(scores => scores.length ? Math.round(Math.max(...scores) / scores.reduce((sum, score) => sum + score, 0) * 100) : 0);
+    this.line(`${cyan(String(scored.length))} active systems · ${cyan(`${ownedShare}%`)} owned · primary ${cyan(`${primaryShare}%`)} · ${yellow(concentration)}${concentrationTrend.length ? ` · ${cyan(sparkline(concentrationTrend))} ${dim('primary share')}` : ''}`);
+    const terminalWidth = process.stdout.columns || 100;
+    const nameWidth = Math.max(20, terminalWidth - 58);
+    this.line(dim(`${cell('Repository', nameWidth)} ${cell('Focus', 19)} ${cell('Days', 5)} ${cell('Commits', 7)} ${cell('PRs', 4)} ${cell('Merged', 7)} Reviews`));
+    const repositoryRows = Math.max(2, Math.min(6, (process.stdout.rows || 40) - engineerRows - 17));
+    scored.slice(0, repositoryRows).forEach(repository => {
+      const share = Math.round(repository.score / total * 100);
+      const bar = `${'█'.repeat(Math.round(share / 10))}${'░'.repeat(10 - Math.round(share / 10))}`;
+      const shortName = repository.name.split('/').pop();
+      this.line(`${cell(shortName, nameWidth)} ${cell(`${bar} ${share}%`, 19)} ${cell(repository.activeDays || '—', 5)} ${cell(repository.commits, 7)} ${cell(repository.pullRequests, 4)} ${cell(repository.merged, 7)} ${repository.reviews}`);
+    });
+    if (scored.length > repositoryRows) this.line(dim(`${scored.length - repositoryRows} more systems not shown`));
+    this.line(dim('Focus weights: commit 1 · PR 3 · merge 2 · review 2. This represents work distribution, not hours.'));
   }
 
   historyView() {
@@ -857,6 +902,7 @@ class App {
       this.ciRuns = this.config.ciEnabled ? loadCiRuns(this.config) : [];
       const recorded = await recordSnapshot(this.config, this.data);
       this.history = loadHistory(this.config);
+      this.focusHistory = loadEngineerFocusHistory(this.config);
       this.message = green(recorded ? 'Signals refreshed · snapshot saved.' : 'Signals refreshed · recent snapshot retained.');
     } catch (error) { this.message = controller.signal.aborted ? yellow('Refresh cancelled. Previous signals retained.') : red(error.message); }
     finally { this.refreshController = null; }
@@ -1006,8 +1052,9 @@ try {
   const config = await loadConfig();
   const [cache, auth] = await Promise.all([loadCache(), authStatus(config.hostname)]);
   const history = loadHistory(config);
+  const focusHistory = loadEngineerFocusHistory(config);
   const ciRuns = config.ciEnabled ? loadCiRuns(config) : [];
-  new App(config, cache, auth, history, ciRuns).start();
+  new App(config, cache, auth, history, ciRuns, focusHistory).start();
 } catch (error) {
   process.stdout.write(`${A}?25h`);
   console.error(`github-signals: ${error.message}`);

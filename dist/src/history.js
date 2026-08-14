@@ -48,6 +48,17 @@ function openHistory(cwd = process.cwd()) {
       name TEXT NOT NULL, open_prs INTEGER NOT NULL, stale_prs INTEGER NOT NULL,
       waiting_reviews INTEGER NOT NULL, stale_issues INTEGER NOT NULL, ci_failures INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS engineer_repository_metrics (
+      snapshot_id INTEGER NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+      login TEXT NOT NULL,
+      repository TEXT NOT NULL,
+      commits INTEGER NOT NULL,
+      pull_requests INTEGER NOT NULL,
+      merged INTEGER NOT NULL,
+      reviews INTEGER NOT NULL,
+      active_days INTEGER NOT NULL,
+      PRIMARY KEY (snapshot_id, login, repository)
+    );
     CREATE TABLE IF NOT EXISTS ci_runs (
       repository TEXT NOT NULL,
       run_id INTEGER NOT NULL,
@@ -73,6 +84,7 @@ function openHistory(cwd = process.cwd()) {
     CREATE INDEX IF NOT EXISTS ci_runs_repo_time ON ci_runs(repository, created_at DESC);
     DELETE FROM engineer_metrics WHERE snapshot_id NOT IN (SELECT id FROM snapshots);
     DELETE FROM repository_metrics WHERE snapshot_id NOT IN (SELECT id FROM snapshots);
+    DELETE FROM engineer_repository_metrics WHERE snapshot_id NOT IN (SELECT id FROM snapshots);
   `);
     for (const suffix of ['-wal', '-shm']) {
         try {
@@ -106,6 +118,8 @@ export async function recordSnapshot(config, data, cwd = process.cwd()) {
         const snapshotId = Number(result.lastInsertRowid);
         const insertEngineer = db.prepare('INSERT INTO engineer_metrics VALUES (?, ?, ?, ?, ?, ?)');
         engineers.forEach(x => insertEngineer.run(snapshotId, x.login, x.commits, x.pullRequests, x.merged, x.reviews));
+        const insertEngineerRepository = db.prepare('INSERT INTO engineer_repository_metrics VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+        engineers.forEach(engineer => (engineer.repositories || []).forEach(repository => insertEngineerRepository.run(snapshotId, engineer.login, repository.name, repository.commits || 0, repository.pullRequests || 0, repository.merged || 0, repository.reviews || 0, repository.activeDays || 0)));
         const insertRepo = db.prepare('INSERT INTO repository_metrics VALUES (?, ?, ?, ?, ?, ?, ?)');
         repositories.forEach(x => insertRepo.run(snapshotId, x.name, x.openPrs, x.stalePrs, x.waitingReviews, x.staleIssues, x.failedRuns));
         const cutoff = new Date(Date.now() - config.historyRetentionDays * 86400000).toISOString();
@@ -130,6 +144,23 @@ export function loadHistory(config, limit = 30, cwd = process.cwd()) {
     try {
         return db.prepare('SELECT * FROM snapshots WHERE scope_hash = ? ORDER BY captured_at DESC LIMIT ?')
             .all(scopeFingerprint(config), limit).reverse();
+    }
+    finally {
+        db.close();
+    }
+}
+export function loadEngineerFocusHistory(config, limit = 30, cwd = process.cwd()) {
+    const db = openHistory(cwd);
+    try {
+        return db.prepare(`SELECT s.captured_at, m.login, m.repository, m.commits, m.pull_requests, m.merged, m.reviews, m.active_days
+      FROM engineer_repository_metrics m
+      JOIN snapshots s ON s.id = m.snapshot_id
+      WHERE s.scope_hash = ? AND s.id IN (
+        SELECT id FROM snapshots WHERE scope_hash = ? ORDER BY captured_at DESC LIMIT ?
+      )
+      ORDER BY s.captured_at, m.login, m.repository`)
+            .all(scopeFingerprint(config), scopeFingerprint(config), limit)
+            .map(row => ({ ...row }));
     }
     finally {
         db.close();

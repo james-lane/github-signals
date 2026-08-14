@@ -2,6 +2,9 @@ export declare const HISTORY_FILE = ".github-signals-history.sqlite";
 export declare function scopeFingerprint(config: any): string;
 export declare function recordSnapshot(config: any, data: any, cwd?: string): Promise<boolean>;
 export declare function loadHistory(config: any, limit?: number, cwd?: string): Record<string, import("node:sqlite").SQLOutputValue>[];
+export declare function loadEngineerFocusHistory(config: any, limit?: number, cwd?: string): {
+    [x: string]: import("node:sqlite").SQLOutputValue;
+}[];
 export declare function recordCiRuns(config: any, runs: any, cwd?: string): Promise<number>;
 export declare function loadCiRuns(config: any, limitPerRepository?: number, cwd?: string): {
     repository: import("node:sqlite").SQLOutputValue;

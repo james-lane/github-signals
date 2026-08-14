@@ -11,7 +11,7 @@ test('recognizes Renovate pull request authors without hiding approval bots', ()
 test('derives private repository engineer activity from repository nodes', () => {
     const activity = [{
             name: 'org/private-repo',
-            commits: [{ oid: '1', authors: { nodes: [{ user: { login: 'octocat' } }] } }],
+            commits: [{ oid: '1', committedDate: '2026-08-10T08:00:00Z', authors: { nodes: [{ user: { login: 'octocat' } }] } }],
             pullRequests: [{
                     id: 'PR_1',
                     createdAt: '2026-08-10T10:00:00Z',
@@ -27,8 +27,12 @@ test('derives private repository engineer activity from repository nodes', () =>
         { id: 'octocat', name: 'Mona' },
         { id: 'hubot', name: 'Hubot' },
     ], activity, '2026-08-01'), [
-        { login: 'octocat', commits: 1, pullRequests: 1, reviews: 0, merged: 1 },
-        { login: 'hubot', commits: 0, pullRequests: 0, reviews: 1, merged: 0 },
+        { login: 'octocat', commits: 1, pullRequests: 1, reviews: 0, merged: 1, repositories: [
+                { name: 'org/private-repo', commits: 1, pullRequests: 1, merged: 1, reviews: 0, activeDays: 2 },
+            ] },
+        { login: 'hubot', commits: 0, pullRequests: 0, reviews: 1, merged: 0, repositories: [
+                { name: 'org/private-repo', commits: 0, pullRequests: 0, merged: 0, reviews: 1, activeDays: 1 },
+            ] },
     ]);
 });
 //# sourceMappingURL=github.test.js.map

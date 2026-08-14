@@ -4,7 +4,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { defaults } from '../src/config.js';
-import { loadCiRuns, loadHistory, recordCiRuns, recordSnapshot, scopeFingerprint } from '../src/history.js';
+import { loadCiRuns, loadEngineerFocusHistory, loadHistory, recordCiRuns, recordSnapshot, scopeFingerprint } from '../src/history.js';
 
 const config = {
   ...defaults,
@@ -13,7 +13,9 @@ const config = {
 };
 const data = {
   fetchedAt: '2026-08-12T12:00:00Z',
-  engineers: [{ login: 'octocat', commits: 3, pullRequests: 2, merged: 1, reviews: 4 }],
+  engineers: [{ login: 'octocat', commits: 3, pullRequests: 2, merged: 1, reviews: 4, repositories: [
+    { name: 'org/core', commits: 3, pullRequests: 2, merged: 1, reviews: 4, activeDays: 3 },
+  ] }],
   repositories: [{ name: 'org/core', openPrs: 5, stalePrs: 1, waitingReviews: 2, staleIssues: 3, failedRuns: 0 }],
 };
 
@@ -25,6 +27,10 @@ test('stores complete aggregate snapshots and deduplicates close refreshes', asy
   assert.equal(history.length, 1);
   assert.equal(history[0].commits, 3);
   assert.equal(history[0].waiting_reviews, 2);
+  assert.deepEqual(loadEngineerFocusHistory(config, 30, dir), [{
+    captured_at: '2026-08-12T12:00:00Z', login: 'octocat', repository: 'org/core', commits: 3,
+    pull_requests: 2, merged: 1, reviews: 4, active_days: 3,
+  }]);
 });
 
 test('scope fingerprint changes with visible repository scope', () => {

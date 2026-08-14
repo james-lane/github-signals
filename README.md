@@ -86,6 +86,8 @@ Repository activity queries use deliberately small, sequential batches with a sh
 
 The app enforces a 60-second cooldown between refresh attempts and never automatically retries a rate-limit response. If GitHub reports a secondary limit, wait for the requested period before refreshing again.
 
+Refresh progress is shown as a determinate footer bar across repository, engineer-focus, and optional GitHub Actions collection. The current stage and percentage remain visible, and `Esc` cancels without replacing the previous successful signals.
+
 GitHub GraphQL connections are bounded to keep queries within resource limits, so extremely high-volume repositories may exceed the fetched activity window. This dashboard is intended for useful team signals, not payroll or performance scoring.
 
 ## CI visibility

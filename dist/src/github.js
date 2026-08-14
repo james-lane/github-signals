@@ -110,12 +110,13 @@ async function api(hostname, endpoint, fields = {}, signal) {
     return JSON.parse(stdout);
 }
 const durationMs = (start, end) => start && end ? Math.max(0, new Date(end).getTime() - new Date(start).getTime()) : null;
-export async function fetchActionsSignals(config, onProgress = () => { }, { signal } = {}) {
+export async function fetchActionsSignals(config, onProgress = () => { }, { signal, progressOffset = 0, progressTotal } = {}) {
     const runs = [];
     const repositories = visibleRepositories(config).map(repositoryName);
+    const total = progressTotal || repositories.length;
     for (let index = 0; index < repositories.length; index++) {
         const repository = repositories[index];
-        onProgress(`Checking Actions for ${repository} (${index + 1}/${repositories.length})…`);
+        onProgress(`Checking Actions for ${repository} (${index + 1}/${repositories.length})…`, { current: progressOffset + index, total });
         try {
             const result = await api(config.hostname, `/repos/${repository}/actions/runs`, { per_page: 20 }, signal);
             for (const run of result.workflow_runs || [])
@@ -146,6 +147,7 @@ export async function fetchActionsSignals(config, onProgress = () => { }, { sign
                 throw error;
             runs.push({ repository, error: error.message });
         }
+        onProgress(`Checked Actions for ${repository} (${index + 1}/${repositories.length})`, { current: progressOffset + index + 1, total });
         if (index < repositories.length - 1)
             await pacedWait(100, signal);
     }
@@ -230,7 +232,7 @@ const contributionCount = (groups, repositories) => {
     const allowed = new Set(repositories.map(repositoryName).map(name => name.toLowerCase()));
     return groups.reduce((sum, group) => allowed.has(group.repository.nameWithOwner.toLowerCase()) ? sum + group.contributions.totalCount : sum, 0);
 };
-async function engineerSignals(config, names, since, signal) {
+async function engineerSignals(config, names, since, signal, onChunk = () => { }) {
     const engineers = [];
     let rateLimit = null;
     const from = `${since}T00:00:00Z`;
@@ -290,6 +292,7 @@ async function engineerSignals(config, names, since, signal) {
                 throw error;
             chunk.forEach(login => engineers.push({ login, error: error.message }));
         }
+        onChunk(Math.min(names.length, offset + chunk.length));
     }
     return { engineers, rateLimit };
 }
@@ -319,7 +322,7 @@ function repositorySignal(config, fullName, repo) {
         archived: repo.isArchived,
     };
 }
-async function repositorySignals(config, names, since, signal) {
+async function repositorySignals(config, names, since, signal, onChunk = () => { }) {
     const repositories = [];
     const activity = [];
     let rateLimit = null;
@@ -367,6 +370,7 @@ async function repositorySignals(config, names, since, signal) {
                 throw error;
             chunk.forEach(name => repositories.push({ name, error: error.message }));
         }
+        onChunk(Math.min(names.length, offset + chunk.length));
     }
     return { repositories, activity, rateLimit };
 }
@@ -438,24 +442,43 @@ export async function fetchSignals(config, onProgress = () => { }, { signal } = 
     let rateLimit = null;
     let repositories = [];
     let activity = [];
+    const repositoryUnits = repositoriesInScope.length ? Math.ceil(repositoriesInScope.length / 2) : 0;
+    const engineerUnits = config.engineers.length
+        ? (repositoriesInScope.length ? 1 : config.repositories.length ? 0 : Math.ceil(config.engineers.length / 20)) : 0;
+    const actionsUnits = config.ciEnabled ? repositoriesInScope.length : 0;
+    const totalProgress = Math.max(1, repositoryUnits + engineerUnits + actionsUnits);
+    let completedProgress = 0;
+    onProgress('Starting refresh…', { current: 0, total: totalProgress });
     if (repositoriesInScope.length) {
-        onProgress(`Checking health and team activity across ${repositoriesInScope.length} repositories…`);
-        const repoResult = await repositorySignals(config, repositoriesInScope.map(repositoryName), since, signal);
+        onProgress(`Checking health and activity across ${repositoriesInScope.length} repositories…`, { current: completedProgress, total: totalProgress });
+        const repoResult = await repositorySignals(config, repositoriesInScope.map(repositoryName), since, signal, processed => {
+            completedProgress = Math.ceil(processed / 2);
+            onProgress(`Repository health and activity (${processed}/${repositoriesInScope.length})`, { current: completedProgress, total: totalProgress });
+        });
         repositories = repoResult.repositories;
         activity = repoResult.activity;
         rateLimit = repoResult.rateLimit || rateLimit;
     }
     if (config.engineers.length) {
-        if (repositoriesInScope.length)
+        if (repositoriesInScope.length) {
+            onProgress('Calculating engineer system focus…', { current: completedProgress, total: totalProgress });
             engineers = engineerSignalsFromRepositories(config.engineers, activity, since);
+            completedProgress += 1;
+            onProgress('Engineer system focus calculated', { current: completedProgress, total: totalProgress });
+        }
         else if (config.repositories.length)
             engineers = config.engineers.map(engineer => ({ login: engineerId(engineer), commits: 0, pullRequests: 0, reviews: 0, merged: 0 }));
         else {
-            onProgress(`Fetching activity for ${config.engineers.length} engineers…`);
-            ({ engineers, rateLimit } = await engineerSignals(config, config.engineers.map(engineerId), since, signal));
+            onProgress(`Fetching activity for ${config.engineers.length} engineers…`, { current: completedProgress, total: totalProgress });
+            ({ engineers, rateLimit } = await engineerSignals(config, config.engineers.map(engineerId), since, signal, processed => {
+                completedProgress = Math.ceil(processed / 20);
+                onProgress(`Engineer activity (${processed}/${config.engineers.length})`, { current: completedProgress, total: totalProgress });
+            }));
         }
     }
-    const ciRuns = config.ciEnabled && repositoriesInScope.length ? await fetchActionsSignals(config, onProgress, { signal }) : [];
+    const ciRuns = config.ciEnabled && repositoriesInScope.length
+        ? await fetchActionsSignals(config, onProgress, { signal, progressOffset: completedProgress, progressTotal: totalProgress }) : [];
+    onProgress('Refresh data collected', { current: totalProgress, total: totalProgress });
     return { fetchedAt: new Date().toISOString(), since, engineers, repositories, ciRuns, rateLimit };
 }
 // @ts-nocheck -- GitHub CLI/GraphQL payloads are validated at runtime during migration.

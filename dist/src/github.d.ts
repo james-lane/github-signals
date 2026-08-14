@@ -11,7 +11,9 @@ export declare function openEngineer(loginName: any, hostname: any): Promise<unk
 export declare function openRepositoryMetric(fullName: any, hostname: any, metric: any, thresholds: any): Promise<unknown>;
 export declare function openPullRequest(url: any): Promise<unknown>;
 export declare function openGitHubUrl(url: any): Promise<unknown>;
-export declare function fetchActionsSignals(config: any, onProgress?: () => void, { signal }?: {}): Promise<({
+export declare function fetchActionsSignals(config: any, onProgress?: () => void, { signal, progressOffset, progressTotal }?: {
+    progressOffset?: number | undefined;
+}): Promise<({
     repository: any;
     id: any;
     attempt: any;

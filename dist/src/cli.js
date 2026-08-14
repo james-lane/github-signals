@@ -91,6 +91,7 @@ class App {
         this.busy = false;
         this.prompting = false;
         this.refreshController = null;
+        this.refreshProgress = null;
         this.lastRefreshStartedAt = 0;
         this.selection = { 1: 0, 2: 0 };
         this.repositoryMetric = 0;
@@ -126,6 +127,14 @@ class App {
         const version = dim(`v${APP_VERSION}`);
         const left = fit(text, Math.max(1, usableWidth - strip(version).length - 1));
         this.line(`${left}${' '.repeat(Math.max(1, usableWidth - strip(left).length - strip(version).length))}${version}`);
+    }
+    refreshFooter() {
+        const progress = this.refreshProgress || { message: 'Refreshing…', current: 0, total: 1 };
+        const ratio = Math.max(0, Math.min(1, progress.total ? progress.current / progress.total : 0));
+        const barWidth = Math.max(10, Math.min(28, Math.floor((process.stdout.columns || 100) / 7)));
+        const filled = Math.round(ratio * barWidth);
+        const bar = `${cyan('█'.repeat(filled))}${dim('░'.repeat(barWidth - filled))}`;
+        return `${dim('[')}${bar}${dim(']')} ${cyan(`${String(Math.round(ratio * 100)).padStart(3)}%`)}  ${progress.message}  ${dim('Esc cancel')}`;
     }
     errorLines(label, error) {
         const width = Math.max(40, process.stdout.columns || 100);
@@ -206,7 +215,7 @@ class App {
                                     : this.currentView() === 'Settings' ? (this.themeEditing ? '←/→ preview theme  Enter apply  Esc setting' : '↑/↓ setting  Enter edit  Esc nav')
                                         : '↑/↓ engineer  Enter open  Esc nav')
                         : '←/→ views  Enter select';
-        this.footer(this.message || dim(`${navigation}${renovateToggle}  r refresh  a add  d delete  p priority  l login  q quit`));
+        this.footer(this.refreshController ? this.refreshFooter() : (this.message || dim(`${navigation}${renovateToggle}  r refresh  a add  d delete  p priority  l login  q quit`)));
         // macOS Terminal may retain saved lines even in the alternate screen. Clear
         // only the active alternate buffer's scrollback after each full redraw.
         process.stdout.write(`${A}3J`);
@@ -964,8 +973,12 @@ class App {
         this.lastRefreshStartedAt = Date.now();
         const controller = new AbortController();
         this.refreshController = controller;
+        this.refreshProgress = { message: 'Starting refresh…', current: 0, total: 1 };
         try {
-            const nextData = await fetchSignals(this.config, message => { this.message = `${cyan(message)} ${dim('Esc cancel')}`; this.render(); }, { signal: controller.signal });
+            const nextData = await fetchSignals(this.config, (message, progress) => {
+                this.refreshProgress = { message, current: progress?.current || 0, total: progress?.total || 1 };
+                this.render();
+            }, { signal: controller.signal });
             this.data = nextData;
             this.ciView = null;
             this.ciErrors = (this.data.ciRuns || []).filter(run => run.error);
@@ -983,6 +996,7 @@ class App {
         }
         finally {
             this.refreshController = null;
+            this.refreshProgress = null;
         }
         this.render();
     }
@@ -1029,6 +1043,8 @@ class App {
         if (key === '\u001b' && this.refreshController) {
             this.refreshController.abort();
             this.message = yellow('Cancelling refresh…');
+            if (this.refreshProgress)
+                this.refreshProgress.message = 'Cancelling refresh…';
             return this.render();
         }
         if (this.busy)

@@ -134,7 +134,7 @@ class App {
         const barWidth = Math.max(10, Math.min(28, Math.floor((process.stdout.columns || 100) / 7)));
         const filled = Math.round(ratio * barWidth);
         const bar = `${cyan('█'.repeat(filled))}${dim('░'.repeat(barWidth - filled))}`;
-        return `${dim('[')}${bar}${dim(']')} ${cyan(`${String(Math.round(ratio * 100)).padStart(3)}%`)}  ${progress.message}  ${dim('Esc cancel')}`;
+        return `${dim('[')}${bar}${dim(']')} ${cyan(`${String(Math.round(ratio * 100)).padStart(3)}%`)}  ${progress.message}  ${dim('c cancel')}`;
     }
     errorLines(label, error) {
         const width = Math.max(40, process.stdout.columns || 100);
@@ -1040,17 +1040,17 @@ class App {
         const key = chunk.toString();
         if (key === '\u0003')
             return this.quit();
-        if (key === '\u001b' && this.refreshController) {
+        if (key === 'c' && this.refreshController) {
             this.refreshController.abort();
             this.message = yellow('Cancelling refresh…');
             if (this.refreshProgress)
                 this.refreshProgress.message = 'Cancelling refresh…';
             return this.render();
         }
-        if (this.busy)
-            return;
         if (key === 'q')
             return this.quit();
+        if (this.busy && !this.refreshController)
+            return;
         if (key === '\u001b' && this.prView) {
             this.prView = null;
             this.message = '';

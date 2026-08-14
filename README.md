@@ -37,7 +37,7 @@ On first launch, press `l` to run the normal `gh auth login` web flow. If you al
 - `p`: toggle a repository between owned and contributing
 - `v` in Repositories or its PR view: show or hide Renovate-authored pull requests
 - `r`: refresh signals
-- `Esc`: cancel an in-progress refresh
+- `c`: cancel an in-progress refresh
 - `l`: authenticate with `gh`
 - `q`: quit
 
@@ -86,7 +86,7 @@ Repository activity queries use deliberately small, sequential batches with a sh
 
 The app enforces a 60-second cooldown between refresh attempts and never automatically retries a rate-limit response. If GitHub reports a secondary limit, wait for the requested period before refreshing again.
 
-Refresh progress is shown as a determinate footer bar across repository, engineer-focus, and optional GitHub Actions collection. The current stage and percentage remain visible, and `Esc` cancels without replacing the previous successful signals.
+Refresh progress is shown as a determinate footer bar across repository, engineer-focus, and optional GitHub Actions collection. The current stage and percentage remain visible. Navigation continues to work during collection, `Esc` retains its normal back-navigation behaviour, and `c` cancels without replacing the previous successful signals.
 
 GitHub GraphQL connections are bounded to keep queries within resource limits, so extremely high-volume repositories may exceed the fetched activity window. This dashboard is intended for useful team signals, not payroll or performance scoring.
 

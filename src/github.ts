@@ -102,11 +102,80 @@ export function openPullRequest(url) {
   return openUrl(url);
 }
 
+export function openGitHubUrl(url) {
+  return openUrl(url);
+}
+
 async function api(hostname, endpoint, fields = {}, signal) {
   const args = ['api', '--hostname', hostname, endpoint, '--method', 'GET'];
   for (const [key, value] of Object.entries(fields)) args.push('-f', `${key}=${value}`);
   const { stdout } = await runGh(args, { signal });
   return JSON.parse(stdout);
+}
+
+const durationMs = (start, end) => start && end ? Math.max(0, new Date(end).getTime() - new Date(start).getTime()) : null;
+
+export async function fetchActionsSignals(config, onProgress = () => {}, { signal } = {}) {
+  const runs = [];
+  const repositories = visibleRepositories(config).map(repositoryName);
+  for (let index = 0; index < repositories.length; index++) {
+    const repository = repositories[index];
+    onProgress(`Checking Actions for ${repository} (${index + 1}/${repositories.length})…`);
+    try {
+      const result = await api(config.hostname, `/repos/${repository}/actions/runs`, { per_page: 20 }, signal);
+      for (const run of result.workflow_runs || []) runs.push({
+        repository,
+        id: run.id,
+        attempt: run.run_attempt || 1,
+        workflowId: run.workflow_id,
+        workflow: run.name || run.display_title || 'Workflow',
+        title: run.display_title || run.name || 'Workflow run',
+        event: run.event,
+        status: run.status,
+        conclusion: run.conclusion,
+        createdAt: run.created_at,
+        startedAt: run.run_started_at,
+        updatedAt: run.updated_at,
+        durationMs: durationMs(run.run_started_at, run.updated_at),
+        queueMs: durationMs(run.created_at, run.run_started_at),
+        headSha: run.head_sha,
+        headBranch: run.head_branch,
+        actor: run.actor?.login,
+        url: run.html_url,
+        pullRequests: (run.pull_requests || []).map(pr => pr.number),
+      });
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      runs.push({ repository, error: error.message });
+    }
+    if (index < repositories.length - 1) await pacedWait(100, signal);
+  }
+  return runs;
+}
+
+export async function fetchWorkflowRunJobs(repository, runId, hostname, signal) {
+  const result = await api(hostname, `/repos/${repository}/actions/runs/${runId}/jobs`, { filter: 'latest', per_page: 100 }, signal);
+  return (result.jobs || []).map(job => ({
+    id: job.id,
+    name: job.name,
+    status: job.status,
+    conclusion: job.conclusion,
+    startedAt: job.started_at,
+    completedAt: job.completed_at,
+    durationMs: durationMs(job.started_at, job.completed_at),
+    runnerName: job.runner_name,
+    runnerGroup: job.runner_group_name,
+    url: job.html_url,
+    steps: (job.steps || []).map(step => ({
+      name: step.name,
+      number: step.number,
+      status: step.status,
+      conclusion: step.conclusion,
+      startedAt: step.started_at,
+      completedAt: step.completed_at,
+      durationMs: durationMs(step.started_at, step.completed_at),
+    })),
+  }));
 }
 
 async function graphql(hostname, query, signal) {
@@ -121,7 +190,7 @@ export async function fetchOpenPullRequests(fullName, hostname, signal) {
       pullRequests(first: 50, states: OPEN, orderBy: { field: UPDATED_AT, direction: DESC }) {
         totalCount
         nodes {
-          number title body createdAt updatedAt isDraft url additions deletions changedFiles
+          number title body createdAt updatedAt isDraft url additions deletions changedFiles headRefOid
           mergeable reviewDecision
           author { login }
           labels(first: 10) { nodes { name } }
@@ -335,6 +404,7 @@ export async function fetchSignals(config, onProgress = () => {}, { signal } = {
       ({ engineers, rateLimit } = await engineerSignals(config, config.engineers.map(engineerId), since, signal));
     }
   }
-  return { fetchedAt: new Date().toISOString(), since, engineers, repositories, rateLimit };
+  const ciRuns = config.ciEnabled && repositoriesInScope.length ? await fetchActionsSignals(config, onProgress, { signal }) : [];
+  return { fetchedAt: new Date().toISOString(), since, engineers, repositories, ciRuns, rateLimit };
 }
 // @ts-nocheck -- GitHub CLI/GraphQL payloads are validated at runtime during migration.

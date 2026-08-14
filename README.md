@@ -31,6 +31,7 @@ On first launch, press `l` to run the normal `gh auth login` web flow. If you al
 - `↑` / `↓` in History: move through the snapshot list and inspect metrics at that point
 - `Enter` in a table: open the selected profile, repository, or filtered metric page
 - `Enter` on a repository's Open PRs metric: inspect its pull requests in the terminal; use `↑` / `↓`, `Enter` to open on the web, and `Esc` to return
+- `Enter` in CI: drill from workflow metrics into recent runs, then into job and step timing; `Esc` moves back one level
 - `a`: add an engineer or repository
 - `d`: remove an item from the Engineers or Repositories screen
 - `p`: toggle a repository between owned and contributing
@@ -42,9 +43,11 @@ On first launch, press `l` to run the normal `gh auth login` web flow. If you al
 
 Configuration, the last successful result, and historical snapshots are stored as `.github-signals.json`, `.github-signals-cache.json`, and `.github-signals-history.sqlite`. These files are ignored by Git and created with owner-only permissions. Tokens are never read or stored by the app. A sanitized [.github-signals.example.json](.github-signals.example.json) documents the complete configuration shape.
 
+GitHub Actions visibility is opt-in because it adds one bounded REST request per in-scope repository during refresh. Enable `CI visibility` in Settings or set `"ciEnabled": true`; it defaults to `false`.
+
 Successful refreshes store aggregated engineer and repository metrics in SQLite. Cancelled or partially failed refreshes are not recorded, snapshots within 15 minutes are deduplicated, and data older than the configurable retention period (90 days by default) is pruned. History is matched to the active scope and thresholds before it is used for dashboard sparklines.
 
-Once a matching snapshot exists, a History view appears between Repositories and Settings. It charts rolling team activity and repository-attention metrics with Unicode sparklines, direction indicators, and a table of recent snapshots.
+Once a matching snapshot exists, a History view appears before Settings. It charts rolling team activity and repository-attention metrics with Unicode sparklines and direction indicators. When CI visibility is enabled, it also charts GitHub Actions success rate, failures, p50/p95 duration, and median queue time for the configured lookback window as it stood at the selected snapshot.
 
 The Settings editor offers `Default`, `TVA`, `Cyberpunk`, `Matrix`, `Dracula`, `Nord`, `Solarized Dark`, `Synthwave`, and `Blueprint` themes. Configure one in the app or set `theme` to its lowercase name; Solarized Dark uses `"solarized-dark"`.
 
@@ -82,6 +85,14 @@ Repository activity queries use deliberately small, sequential batches with a sh
 The app enforces a 60-second cooldown between refresh attempts and never automatically retries a rate-limit response. If GitHub reports a secondary limit, wait for the requested period before refreshing again.
 
 GitHub GraphQL connections are bounded to keep queries within resource limits, so extremely high-volume repositories may exceed the fetched activity window. This dashboard is intended for useful team signals, not payroll or performance scoring.
+
+## CI visibility
+
+The CI view uses only GitHub Actions data available through the authenticated `gh` CLI. Each refresh captures the latest 20 workflow runs for every in-scope repository and stores them in the local SQLite history database. It calculates workflow run counts, success and failure rates, median and p95 duration, median queue time, and latest status. The Overview dashboard summarizes these measures alongside failing and currently running workflows, while History shows how they changed at each stored snapshot.
+
+Select a workflow to inspect recent runs and their branch, result, duration, queue time, attempt, event, actor, and commit. Selecting a run fetches its jobs and step timings on demand, keeping normal refreshes bounded. Press Enter on a job to open it on GitHub. Pull-request details also summarize stored Actions runs matching the PR's head commit.
+
+This feature does not attempt test-case analytics, distributed traces, coverage analysis, or flaky-test detection because GitHub does not expose those consistently without additional workflow instrumentation or uploaded reports.
 
 ## Development
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // @ts-nocheck -- Incremental migration boundary for the stateful terminal UI.
-import { authStatus, fetchOpenPullRequests, fetchSignals, isRenovateAuthor, login, openEngineer, openPullRequest, openRepositoryMetric } from './github.js';
+import { authStatus, fetchOpenPullRequests, fetchSignals, fetchWorkflowRunJobs, isRenovateAuthor, login, openEngineer, openGitHubUrl, openPullRequest, openRepositoryMetric } from './github.js';
 import { CACHE_FILE, CONFIG_FILE, engineerId, loadCache, loadConfig, repositoryName, saveCache, saveConfig, visibleRepositories } from './config.js';
-import { HISTORY_FILE, loadHistory, recordSnapshot } from './history.js';
+import { HISTORY_FILE, loadCiRuns, loadHistory, recordCiRuns, recordSnapshot } from './history.js';
 import { sanitizeTerminal } from './terminal.js';
 
 const A = '\x1b[';
@@ -45,6 +45,19 @@ const elapsed = value => {
   if (days < 14) return `${days}d ${hours % 24}h`;
   return `${Math.floor(days / 7)}w ${days % 7}d`;
 };
+const duration = milliseconds => {
+  if (milliseconds == null) return '—';
+  const seconds = Math.round(milliseconds / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m${String(seconds % 60).padStart(2, '0')}s`;
+  return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}m`;
+};
+const percentile = (values, percentileValue) => {
+  const sorted = values.filter(value => value != null).sort((a, b) => a - b);
+  if (!sorted.length) return null;
+  return sorted[Math.min(sorted.length - 1, Math.ceil(percentileValue * sorted.length) - 1)];
+};
 const sparkline = values => {
   const bars = '▁▂▃▄▅▆▇█';
   if (!values.length) return dim('no history');
@@ -58,7 +71,7 @@ const trend = (current, previous, lowerIsBetter = false) => {
 };
 
 class App {
-  constructor(config, cache, auth, history = []) {
+  constructor(config, cache, auth, history = [], ciRuns = []) {
     this.config = config;
     this.data = cache;
     this.auth = auth;
@@ -77,16 +90,24 @@ class App {
     this.themeEditing = false;
     this.promptState = null;
     this.prView = null;
+    this.ciRuns = ciRuns;
+    this.ciErrors = (cache?.ciRuns || []).filter(run => run.error);
+    this.ciSelection = 0;
+    this.ciView = null;
     this.showRenovatePullRequests = true;
     setTheme(config.theme);
-    this.tabs = this.history.length ? ['Overview', 'Engineers', 'Repositories', 'History', 'Settings'] : ['Overview', 'Engineers', 'Repositories', 'Settings'];
+    this.tabs = this.buildTabs();
+  }
+
+  buildTabs() {
+    return ['Overview', 'Engineers', 'Repositories', ...(this.config.ciEnabled && this.config.repositories.length ? ['CI'] : []), ...(this.history.length ? ['History'] : []), 'Settings'];
   }
 
   currentView() { return this.tabs[this.tab]; }
 
   syncTabs() {
     const current = this.currentView();
-    this.tabs = this.history.length ? ['Overview', 'Engineers', 'Repositories', 'History', 'Settings'] : ['Overview', 'Engineers', 'Repositories', 'Settings'];
+    this.tabs = this.buildTabs();
     this.tab = Math.max(0, this.tabs.indexOf(current));
   }
 
@@ -107,6 +128,33 @@ class App {
   }
   badge(n, bad = false) { return n ? (bad ? red(String(n)) : cyan(String(n))) : dim('0'); }
 
+  ciMetricsAt(capturedAt = new Date().toISOString()) {
+    const end = new Date(capturedAt).getTime();
+    const start = end - this.config.lookbackDays * 86400000;
+    const runs = this.ciRuns.filter(run => {
+      const created = new Date(run.createdAt).getTime();
+      return !run.error && created >= start && created <= end;
+    });
+    const failedConclusions = new Set(['failure', 'timed_out', 'action_required', 'startup_failure']);
+    const decided = runs.filter(run => run.conclusion === 'success' || failedConclusions.has(run.conclusion));
+    const successful = decided.filter(run => run.conclusion === 'success').length;
+    const failed = decided.length - successful;
+    const completed = runs.filter(run => run.status === 'completed');
+    const workflows = new Set(runs.map(run => `${run.repository}:${run.workflowId || run.workflow}`));
+    const failingWorkflows = new Set(runs.filter(run => failedConclusions.has(run.conclusion)).map(run => `${run.repository}:${run.workflowId || run.workflow}`));
+    return {
+      runs: runs.length,
+      workflows: workflows.size,
+      failingWorkflows: failingWorkflows.size,
+      failed,
+      running: runs.filter(run => run.status !== 'completed').length,
+      successRate: decided.length ? Math.round(successful / decided.length * 100) : null,
+      p50: percentile(completed.map(run => run.durationMs), 0.5),
+      p95: percentile(completed.map(run => run.durationMs), 0.95),
+      queue: percentile(completed.map(run => run.queueMs), 0.5),
+    };
+  }
+
   render() {
     this.syncTabs();
     if (!this.prompting && process.stdin.isTTY && !process.stdin.isRaw) process.stdin.setRawMode(true);
@@ -119,14 +167,18 @@ class App {
     if (this.currentView() === 'Overview') this.overview();
     if (this.currentView() === 'Engineers') this.engineers();
     if (this.currentView() === 'Repositories') this.prView ? this.pullRequestsView() : this.repositories();
+    if (this.currentView() === 'CI') this.ciView ? this.ciDetailView() : this.ciOverview();
     if (this.currentView() === 'History') this.historyView();
     if (this.currentView() === 'Settings') this.settings();
     this.line();
     this.line(dim('─'.repeat(width)));
     const renovateToggle = (this.prView || this.currentView() === 'Repositories') ? `  v Renovate ${this.showRenovatePullRequests ? 'shown' : 'hidden'}` : '';
     const navigation = this.prView ? '↑/↓ pull request  Enter open on web  Esc repositories'
+      : this.currentView() === 'CI' && this.ciView?.type === 'run' ? '↑/↓ job  Enter open on web  Esc runs'
+      : this.currentView() === 'CI' && this.ciView?.type === 'workflow' ? '↑/↓ run  Enter jobs  Esc workflows'
       : this.contentFocused
       ? (this.currentView() === 'Repositories' ? '↑/↓ repo  ←/→ metric  Enter open  Esc nav'
+        : this.currentView() === 'CI' ? '↑/↓ workflow  Enter runs  Esc nav'
         : this.currentView() === 'History' ? '↑/↓ snapshot  Esc nav'
         : this.currentView() === 'Settings' ? (this.themeEditing ? '←/→ preview theme  Enter apply  Esc setting' : '↑/↓ setting  Enter edit  Esc nav')
           : '↑/↓ engineer  Enter open  Esc nav')
@@ -150,6 +202,7 @@ class App {
     const repos = (this.data.repositories || []).filter(repo => visibleNames.has(repo.name));
     const totals = e.reduce((a, x) => ({ commits: a.commits + (x.commits || 0), prs: a.prs + (x.pullRequests || 0), merged: a.merged + (x.merged || 0), reviews: a.reviews + (x.reviews || 0) }), { commits: 0, prs: 0, merged: 0, reviews: 0 });
     const repoTotals = repos.reduce((a, x) => ({ open: a.open + (x.openPrs || 0), stale: a.stale + (x.stalePrs || 0), waiting: a.waiting + (x.waitingReviews || 0), issues: a.issues + (x.staleIssues || 0), ci: a.ci + (x.failedRuns || 0) }), { open: 0, stale: 0, waiting: 0, issues: 0, ci: 0 });
+    const ci = this.ciMetricsAt(this.data.fetchedAt || new Date().toISOString());
     const width = process.stdout.columns || 100;
     const gap = 2;
     const panelWidth = width >= 96 ? Math.floor((width - gap) / 2) : width;
@@ -178,6 +231,21 @@ class App {
     };
     drawPanels(activityPanel, healthPanel);
     this.line();
+    if (this.config.ciEnabled) {
+      const ciHistory = this.history.map(snapshot => this.ciMetricsAt(snapshot.captured_at));
+      const ciPanel = panel(`CI performance · ${this.config.lookbackDays} days`, [
+        `${ci.successRate == null ? dim('  —') : ci.successRate >= 90 ? green(`${String(ci.successRate).padStart(3)}%`) : red(`${String(ci.successRate).padStart(3)}%`)} success   ${cyan(String(ci.runs).padStart(3))} runs across ${cyan(String(ci.workflows))} workflows`,
+        `p50 ${cyan(duration(ci.p50))}   p95 ${cyan(duration(ci.p95))}   queue ${cyan(duration(ci.queue))}`,
+        `${cyan(sparkline(ciHistory.map(item => item.successRate ?? 0)))} ${dim(`success rate · ${this.history.length} snapshots`)}`,
+      ]);
+      const ciAttentionPanel = panel('CI attention', [
+        `${ci.failed ? red(String(ci.failed).padStart(3)) : green('  0')} failed runs   ${ci.running ? yellow(String(ci.running).padStart(3)) : green('  0')} running`,
+        `${ci.failingWorkflows ? red(String(ci.failingWorkflows).padStart(3)) : green('  0')} workflows with failures`,
+        ci.runs ? dim('Enter the CI view for workflow, run, job and step detail') : dim('No stored Actions runs yet · press r to refresh'),
+      ]);
+      drawPanels(ciPanel, ciAttentionPanel);
+      this.line();
+    }
     const engineerById = new Map(this.config.engineers.map(engineer => [engineerId(engineer), engineer]));
     const topEngineers = [...e].filter(x => !x.error).sort((a, b) => (b.commits + b.pullRequests + b.reviews) - (a.commits + a.pullRequests + a.reviews)).slice(0, 4);
     const hotspots = [...repos].filter(x => !x.error).map(repo => ({ ...repo, attention: (repo.stalePrs || 0) + (repo.waitingReviews || 0) + (repo.staleIssues || 0) + (repo.failedRuns || 0) })).sort((a, b) => b.attention - a.attention).slice(0, 4);
@@ -244,6 +312,26 @@ class App {
     metric('Stale issues', 'stale_issues', true);
     metric('CI failures', 'ci_failures', true);
     this.line();
+    if (this.config.ciEnabled) {
+      const ciTimeline = snapshots.map(snapshot => this.ciMetricsAt(snapshot.captured_at));
+      const selectedCi = ciTimeline[selectedIndex];
+      const previousCi = ciTimeline[selectedIndex - 1];
+      const ciMetric = (label, key, formatter, lowerIsBetter = false) => {
+        const values = ciTimeline.map(item => item[key] ?? 0);
+        const current = selectedCi[key];
+        const previous = previousCi?.[key];
+        const value = current == null ? '—' : formatter(current);
+        this.line(`${cell(label, 18)} ${cyan(sparkline(values).padEnd(30))}  ${String(value).padStart(7)} ${current == null ? dim('→') : trend(current, previous, lowerIsBetter)}`);
+      };
+      this.line(bold(`CI performance · ${this.config.lookbackDays}-day window`));
+      ciMetric('Success rate', 'successRate', value => `${value}%`);
+      ciMetric('Failed runs', 'failed', String, true);
+      ciMetric('p50 duration', 'p50', duration, true);
+      ciMetric('p95 duration', 'p95', duration, true);
+      ciMetric('Median queue', 'queue', duration, true);
+      this.line(dim(`${selectedCi.runs} stored runs across ${selectedCi.workflows} workflows at this snapshot`));
+      this.line();
+    }
     this.line(bold('Recent snapshots'));
     this.line(dim(`${cell('Captured', 22)} ${cell('Commits', 9)} ${cell('PRs', 6)} ${cell('Reviews', 9)} ${cell('Attention', 10)}`));
     const windowStart = Math.max(0, Math.min(selectedIndex - 3, snapshots.length - 8));
@@ -252,6 +340,120 @@ class App {
       const isSelected = item === selected && this.contentFocused;
       const row = `${cell(`${isSelected ? '› ' : '  '}${new Date(item.captured_at).toLocaleString()}`, 22)} ${cell(item.commits, 9)} ${cell(item.pull_requests, 6)} ${cell(item.reviews, 9)} ${cell(attention, 10)}`;
       this.line(isSelected ? bold(selectedRow(row)) : row);
+    });
+  }
+
+  ciWorkflowGroups() {
+    const groups = new Map();
+    for (const run of this.ciRuns.filter(run => !run.error)) {
+      const key = `${run.repository}:${run.workflowId || run.workflow}`;
+      if (!groups.has(key)) groups.set(key, { key, repository: run.repository, workflow: run.workflow, runs: [] });
+      groups.get(key).runs.push(run);
+    }
+    return [...groups.values()].map(group => {
+      group.runs.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      const completed = group.runs.filter(run => run.conclusion);
+      const durations = completed.map(run => run.durationMs).filter(value => value != null);
+      const queues = completed.map(run => run.queueMs).filter(value => value != null);
+      const successes = completed.filter(run => run.conclusion === 'success').length;
+      const failures = completed.filter(run => ['failure', 'timed_out', 'action_required'].includes(run.conclusion)).length;
+      return {
+        ...group,
+        completed: completed.length,
+        successRate: completed.length ? successes / completed.length : null,
+        failures,
+        p50: percentile(durations, 0.5),
+        p95: percentile(durations, 0.95),
+        queue: percentile(queues, 0.5),
+        latest: group.runs[0],
+      };
+    }).sort((a, b) => b.failures - a.failures || (b.latest?.createdAt || '').localeCompare(a.latest?.createdAt || ''));
+  }
+
+  ciOverview() {
+    const groups = this.ciWorkflowGroups();
+    this.ciSelection = Math.min(this.ciSelection, Math.max(0, groups.length - 1));
+    this.line(bold('CI workflows'));
+    const visibleRows = Math.max(5, (process.stdout.rows || 40) - 12);
+    const start = Math.max(0, Math.min(this.ciSelection - Math.floor(visibleRows / 2), groups.length - visibleRows));
+    const end = Math.min(groups.length, start + visibleRows);
+    this.line(dim(`GitHub Actions · ${this.ciRuns.length} stored runs · workflows ${groups.length ? `${start + 1}–${end} of ${groups.length}` : '0'} · ${this.config.historyRetentionDays}-day retention`));
+    if (this.ciErrors.length) this.line(yellow(`${this.ciErrors.length} repositories could not return Actions data during the last refresh.`));
+    this.line();
+    if (!groups.length) {
+      this.line(dim('No Actions history yet. Press r to refresh GitHub signals.'));
+      return;
+    }
+    const terminalWidth = process.stdout.columns || 100;
+    const fixedWidth = 10 + 8 + 8 + 8 + 8 + 10;
+    const nameWidth = Math.max(24, terminalWidth - fixedWidth);
+    this.line(dim(`${cell('Workflow', nameWidth)} ${cell('Runs', 6)} ${cell('Success', 8)} ${cell('p50', 7)} ${cell('p95', 7)} ${cell('Queue', 7)} Last`));
+    groups.slice(start, end).forEach((group, visibleIndex) => {
+      const index = start + visibleIndex;
+      const selected = this.contentFocused && index === this.ciSelection;
+      const state = group.latest?.status !== 'completed' ? yellow('running') : group.latest?.conclusion === 'success' ? green('passed') : red(group.latest?.conclusion || 'unknown');
+      const label = `${selected ? '›' : ' '} ${group.repository} · ${group.workflow}`;
+      const row = `${cell(label, nameWidth)} ${cell(group.completed, 6)} ${cell(group.successRate == null ? '—' : `${Math.round(group.successRate * 100)}%`, 8)} ${cell(duration(group.p50), 7)} ${cell(duration(group.p95), 7)} ${cell(duration(group.queue), 7)} ${state}`;
+      this.line(selected ? selectedRow(row) : row);
+    });
+  }
+
+  ciDetailView() {
+    if (this.ciView.type === 'workflow') return this.ciWorkflowRunsView();
+    if (this.ciView.type === 'run') return this.ciRunJobsView();
+  }
+
+  ciWorkflowRunsView() {
+    const { group } = this.ciView;
+    const runs = group.runs;
+    this.ciView.selection = Math.min(this.ciView.selection, Math.max(0, runs.length - 1));
+    const selection = this.ciView.selection;
+    const selected = runs[selection];
+    this.line(bold(`${group.workflow} · ${group.repository}`));
+    this.line(dim(`${group.completed} completed · ${group.successRate == null ? '—' : `${Math.round(group.successRate * 100)}% success`} · p50 ${duration(group.p50)} · p95 ${duration(group.p95)}`));
+    this.line();
+    const visibleRows = Math.min(10, Math.max(6, runs.length));
+    const start = Math.max(0, Math.min(selection - Math.floor(visibleRows / 2), runs.length - visibleRows));
+    this.line(dim(`${cell('Run', 38)} ${cell('Branch', 20)} ${cell('Result', 12)} ${cell('Duration', 10)} Queue`));
+    runs.slice(start, start + visibleRows).forEach(run => {
+      const active = run === selected;
+      const result = run.status !== 'completed' ? 'running' : run.conclusion || 'unknown';
+      const row = `${cell(`${active ? '›' : ' '} #${run.id} ${run.title}`, 38)} ${cell(run.headBranch || '—', 20)} ${cell(result, 12)} ${cell(duration(run.durationMs), 10)} ${duration(run.queueMs)}`;
+      this.line(active ? selectedRow(row) : row);
+    });
+    for (let index = Math.min(visibleRows, runs.length); index < visibleRows; index++) this.line();
+    this.line();
+    this.line(`${bold(selected.title)}  ${selected.conclusion === 'success' ? green('passed') : selected.status !== 'completed' ? yellow('running') : red(selected.conclusion || 'unknown')}`);
+    this.line(`${selected.headBranch || '—'} · ${selected.headSha?.slice(0, 7) || '—'} · ${selected.actor ? `@${selected.actor}` : 'unknown actor'} · ${new Date(selected.createdAt).toLocaleString()}`);
+    this.line(`Duration ${cyan(duration(selected.durationMs))} · Queue ${cyan(duration(selected.queueMs))} · Attempt ${selected.attempt} · Event ${selected.event || '—'}`);
+  }
+
+  ciRunJobsView() {
+    const { run, jobs } = this.ciView;
+    this.ciView.selection = Math.min(this.ciView.selection, Math.max(0, jobs.length - 1));
+    const selected = jobs[this.ciView.selection];
+    this.line(bold(`${run.workflow} · ${run.repository}`));
+    this.line(`${run.title} · ${run.conclusion === 'success' ? green('passed') : run.status !== 'completed' ? yellow('running') : red(run.conclusion || 'unknown')} · ${duration(run.durationMs)}`);
+    this.line();
+    if (!jobs.length) { this.line(dim('No jobs returned for this workflow run.')); return; }
+    const visibleRows = Math.max(4, Math.min(12, (process.stdout.rows || 40) - 18));
+    const start = Math.max(0, Math.min(this.ciView.selection - Math.floor(visibleRows / 2), jobs.length - visibleRows));
+    const end = Math.min(jobs.length, start + visibleRows);
+    this.line(dim(`${cell(`Job · ${start + 1}–${end} of ${jobs.length}`, 42)} ${cell('Result', 14)} ${cell('Duration', 10)} Runner`));
+    jobs.slice(start, end).forEach((job, visibleIndex) => {
+      const index = start + visibleIndex;
+      const active = index === this.ciView.selection;
+      const row = `${cell(`${active ? '›' : ' '} ${job.name}`, 42)} ${cell(job.conclusion || job.status || '—', 14)} ${cell(duration(job.durationMs), 10)} ${job.runnerName || '—'}`;
+      this.line(active ? selectedRow(row) : row);
+    });
+    this.line();
+    const stepRows = Math.max(3, (process.stdout.rows || 40) - visibleRows - 16);
+    const visibleSteps = selected.steps.slice(0, stepRows);
+    const stepRange = selected.steps.length > visibleSteps.length ? ` · showing ${visibleSteps.length} of ${selected.steps.length}` : '';
+    this.line(bold(`Steps · ${selected.name}${stepRange}`));
+    visibleSteps.forEach(step => {
+      const result = step.conclusion === 'success' ? green('passed') : step.conclusion ? red(step.conclusion) : dim(step.status || '—');
+      this.line(`${cell(step.name, 52)} ${cell(duration(step.durationMs), 10)} ${result}`);
     });
   }
 
@@ -359,6 +561,14 @@ class App {
       else metricRow += next;
     });
     if (metricRow) this.line(metricRow);
+    const ciRuns = this.config.ciEnabled ? this.ciRuns.filter(run => run.repository === repository && run.headSha === pr.headRefOid) : [];
+    if (this.config.ciEnabled && ciRuns.length) {
+      const passed = ciRuns.filter(run => run.conclusion === 'success').length;
+      const failed = ciRuns.filter(run => ['failure', 'timed_out', 'action_required'].includes(run.conclusion)).length;
+      const running = ciRuns.filter(run => run.status !== 'completed').length;
+      const totalDuration = ciRuns.reduce((sum, run) => sum + (run.durationMs || 0), 0);
+      this.line(`CI: ${green(`${passed} passed`)} · ${failed ? red(`${failed} failed`) : dim('0 failed')} · ${running ? yellow(`${running} running`) : dim('0 running')} · ${cyan(duration(totalDuration))} total`);
+    } else if (this.config.ciEnabled) this.line(dim('CI: no stored workflow runs matched this PR commit'));
     if (pr.labels.length) this.line(`Labels: ${pr.labels.map(label => cyan(label)).join(', ')}`);
     if (pr.assignees.length) this.line(`Assignees: ${pr.assignees.map(login => `@${login}`).join(', ')}`);
     if (pr.requestedReviewers.length) this.line(`Review requested: ${pr.requestedReviewers.map(login => `@${login}`).join(', ')}`);
@@ -391,6 +601,39 @@ class App {
     this.selection[this.tab] = (this.selection[this.tab] + delta + items.length) % items.length;
   }
 
+  moveCiSelection(delta) {
+    if (!this.ciView) {
+      const groups = this.ciWorkflowGroups();
+      if (groups.length) this.ciSelection = Math.max(0, Math.min(groups.length - 1, this.ciSelection + delta));
+    } else {
+      const items = this.ciView.type === 'workflow' ? this.ciView.group.runs : this.ciView.jobs;
+      if (items.length) this.ciView.selection = Math.max(0, Math.min(items.length - 1, this.ciView.selection + delta));
+    }
+  }
+
+  async openCiSelected() {
+    if (!this.ciView) {
+      const group = this.ciWorkflowGroups()[this.ciSelection];
+      if (group) this.ciView = { type: 'workflow', group, selection: 0 };
+      return this.render();
+    }
+    if (this.ciView.type === 'workflow') {
+      const group = this.ciView.group;
+      const run = group.runs[this.ciView.selection];
+      if (!run) return;
+      this.message = cyan(`Loading jobs for ${run.workflow}…`);
+      this.render();
+      const jobs = await fetchWorkflowRunJobs(run.repository, run.id, this.config.hostname);
+      this.ciView = { type: 'run', group, run, jobs, selection: 0 };
+      this.message = '';
+      return this.render();
+    }
+    const job = this.ciView.jobs[this.ciView.selection];
+    await openGitHubUrl(job?.url || this.ciView.run.url);
+    this.message = green(`Opened ${job?.name || this.ciView.run.workflow}.`);
+    this.render();
+  }
+
   async openSelected() {
     const items = this.selectableItems();
     if (!items.length) return;
@@ -421,6 +664,7 @@ class App {
       ['Theme', cyan(themeNames[this.config.theme] || 'Default')],
       ['Activity lookback', `${cyan(this.config.lookbackDays)} days`],
       ['Contributing repos', this.config.showContributingRepositories ? green('shown') : dim('hidden (owned only)')],
+      ['CI visibility', this.config.ciEnabled ? green('enabled') : dim('disabled')],
       ['Stale pull request', `${cyan(t.stalePrDays)} days without an update`],
       ['Review wait', `${cyan(t.reviewWaitHours)} hours`],
       ['Stale issue', `${cyan(t.staleIssueDays)} days without an update`],
@@ -451,10 +695,20 @@ class App {
       this.message = green(`Contributing repositories ${this.config.showContributingRepositories ? 'shown' : 'hidden'}.`);
       return this.render();
     }
+    if (this.settingsSelection === 4) {
+      this.config.ciEnabled = !this.config.ciEnabled;
+      await saveConfig(this.config);
+      this.ciRuns = this.config.ciEnabled ? loadCiRuns(this.config) : [];
+      this.ciErrors = [];
+      this.ciView = null;
+      this.message = green(`CI visibility ${this.config.ciEnabled ? 'enabled' : 'disabled'}.`);
+      return this.render();
+    }
     const fields = [
       ['GitHub hostname', this.config.hostname, value => { this.config.hostname = value; }],
       null,
       ['Activity lookback (days)', this.config.lookbackDays, value => { this.config.lookbackDays = Number(value) || 14; }],
+      null,
       null,
       ['Stale PR threshold (days)', t.stalePrDays, value => { t.stalePrDays = Number(value) || 3; }],
       ['Review wait threshold (hours)', t.reviewWaitHours, value => { t.reviewWaitHours = Number(value) || 24; }],
@@ -573,6 +827,8 @@ class App {
     this.config.lookbackDays = Number(await this.prompt('Activity lookback (days)', String(this.config.lookbackDays))) || 14;
     const showContributing = await this.prompt('Show contributing repositories? (y/n)', this.config.showContributingRepositories ? 'y' : 'n');
     this.config.showContributingRepositories = showContributing.toLowerCase().startsWith('y');
+    const ciEnabled = await this.prompt('Enable CI visibility? (y/n)', this.config.ciEnabled ? 'y' : 'n');
+    this.config.ciEnabled = ciEnabled.toLowerCase().startsWith('y');
     this.config.thresholds.stalePrDays = Number(await this.prompt('Stale PR threshold (days)', String(this.config.thresholds.stalePrDays))) || 3;
     this.config.thresholds.reviewWaitHours = Number(await this.prompt('Review wait threshold (hours)', String(this.config.thresholds.reviewWaitHours))) || 24;
     this.config.thresholds.staleIssueDays = Number(await this.prompt('Stale issue threshold (days)', String(this.config.thresholds.staleIssueDays))) || 14;
@@ -594,7 +850,11 @@ class App {
     try {
       const nextData = await fetchSignals(this.config, message => { this.message = `${cyan(message)} ${dim('Esc cancel')}`; this.render(); }, { signal: controller.signal });
       this.data = nextData;
+      this.ciView = null;
+      this.ciErrors = (this.data.ciRuns || []).filter(run => run.error);
       await saveCache(this.data);
+      if (this.config.ciEnabled) await recordCiRuns(this.config, this.data.ciRuns || []);
+      this.ciRuns = this.config.ciEnabled ? loadCiRuns(this.config) : [];
       const recorded = await recordSnapshot(this.config, this.data);
       this.history = loadHistory(this.config);
       this.message = green(recorded ? 'Signals refreshed · snapshot saved.' : 'Signals refreshed · recent snapshot retained.');
@@ -645,6 +905,12 @@ class App {
       this.message = '';
       return this.render();
     }
+    if (key === '\u001b' && this.ciView) {
+      if (this.ciView.type === 'run') this.ciView = { type: 'workflow', group: this.ciView.group, selection: this.ciView.group.runs.indexOf(this.ciView.run) };
+      else this.ciView = null;
+      this.message = '';
+      return this.render();
+    }
     if (key === '\u001b' && this.contentFocused) {
       if (this.currentView() === 'Settings' && this.themeEditing) {
         this.themeEditing = false;
@@ -670,7 +936,8 @@ class App {
     }
     if (key === '\u001b[A' && this.contentFocused && !this.themeEditing) {
       if (this.prView) this.prView.selection = Math.max(0, this.prView.selection - 1);
-      else if (this.currentView() === 'Settings') this.settingsSelection = (this.settingsSelection + 8) % 9;
+      else if (this.currentView() === 'CI') this.moveCiSelection(-1);
+      else if (this.currentView() === 'Settings') this.settingsSelection = (this.settingsSelection + 9) % 10;
       else if (this.currentView() === 'History') this.historySelection = Math.min(this.history.length - 1, this.historySelection + 1);
       else this.moveSelection(-1);
     }
@@ -679,7 +946,8 @@ class App {
         const visibleCount = this.prView.pullRequests.filter(pr => this.showRenovatePullRequests || !isRenovateAuthor(pr.author?.login)).length;
         this.prView.selection = Math.min(visibleCount - 1, this.prView.selection + 1);
       }
-      else if (this.currentView() === 'Settings') this.settingsSelection = (this.settingsSelection + 1) % 9;
+      else if (this.currentView() === 'CI') this.moveCiSelection(1);
+      else if (this.currentView() === 'Settings') this.settingsSelection = (this.settingsSelection + 1) % 10;
       else if (this.currentView() === 'History') this.historySelection = Math.max(0, this.historySelection - 1);
       else this.moveSelection(1);
     }
@@ -704,10 +972,11 @@ class App {
         this.message = green(`Opened ${this.prView.repository}#${pr.number}.`);
         this.render();
       });
-      if (!this.contentFocused && ((this.currentView() === 'Engineers' || this.currentView() === 'Repositories') ? this.selectableItems().length : (this.currentView() === 'Settings' || (this.currentView() === 'History' && this.history.length)))) {
+      if (!this.contentFocused && ((this.currentView() === 'Engineers' || this.currentView() === 'Repositories') ? this.selectableItems().length : (this.currentView() === 'CI' ? this.ciWorkflowGroups().length : (this.currentView() === 'Settings' || (this.currentView() === 'History' && this.history.length))))) {
         this.contentFocused = true;
         return this.render();
       }
+      if (this.contentFocused && this.currentView() === 'CI') return this.runAction(() => this.openCiSelected());
       if (this.contentFocused && this.currentView() === 'Settings') return this.runAction(() => this.editSelectedSetting());
       if (this.contentFocused) return this.runAction(() => this.openSelected());
     }
@@ -737,7 +1006,8 @@ try {
   const config = await loadConfig();
   const [cache, auth] = await Promise.all([loadCache(), authStatus(config.hostname)]);
   const history = loadHistory(config);
-  new App(config, cache, auth, history).start();
+  const ciRuns = config.ciEnabled ? loadCiRuns(config) : [];
+  new App(config, cache, auth, history, ciRuns).start();
 } catch (error) {
   process.stdout.write(`${A}?25h`);
   console.error(`github-signals: ${error.message}`);

@@ -5,6 +5,7 @@ export declare const defaults: {
     lookbackDays: number;
     theme: string;
     showContributingRepositories: boolean;
+    ciEnabled: boolean;
     historyRetentionDays: number;
     engineers: never[];
     repositories: never[];
@@ -33,6 +34,7 @@ export declare function validateConfig(parsed?: {}): {
     lookbackDays: any;
     historyRetentionDays: any;
     showContributingRepositories: boolean;
+    ciEnabled: boolean;
     theme: any;
     engineers: any;
     repositories: any;
@@ -48,6 +50,7 @@ export declare function loadConfig(cwd?: string): Promise<{
     lookbackDays: any;
     historyRetentionDays: any;
     showContributingRepositories: boolean;
+    ciEnabled: boolean;
     theme: any;
     engineers: any;
     repositories: any;

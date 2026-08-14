@@ -15,10 +15,18 @@ test('merges persisted thresholds with defaults', async () => {
     assert.equal(loaded.hostname, 'github.example.com');
     assert.equal(loaded.theme, 'default');
     assert.equal(loaded.showContributingRepositories, false);
+    assert.equal(loaded.ciEnabled, false);
     assert.equal(loaded.historyRetentionDays, 90);
     assert.equal(loaded.thresholds.stalePrDays, 7);
     assert.equal(loaded.thresholds.reviewWaitHours, defaults.thresholds.reviewWaitHours);
     assert.equal((await readFile(path.join(dir, '.github-signals.json'))).toString().endsWith('\n'), true);
+});
+test('CI visibility is opt-in', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'signals-'));
+    await saveConfig({ ...defaults, ciEnabled: true }, dir);
+    assert.equal((await loadConfig(dir)).ciEnabled, true);
+    await saveConfig({ ...defaults, ciEnabled: 'yes' }, dir);
+    assert.equal((await loadConfig(dir)).ciEnabled, false);
 });
 test('accepts TVA theme and rejects unknown themes', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'signals-'));

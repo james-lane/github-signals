@@ -4,7 +4,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { defaults } from '../src/config.js';
-import { loadHistory, recordSnapshot, scopeFingerprint } from '../src/history.js';
+import { loadCiRuns, loadHistory, recordCiRuns, recordSnapshot, scopeFingerprint } from '../src/history.js';
 const config = {
     ...defaults,
     engineers: [{ id: 'octocat', name: 'Mona' }],
@@ -32,5 +32,20 @@ test('does not store partial snapshots', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'signals-history-'));
     assert.equal(await recordSnapshot(config, { ...data, repositories: [{ name: 'org/core', error: 'failed' }] }, dir), false);
     assert.equal(loadHistory(config, 30, dir).length, 0);
+});
+test('stores and updates GitHub Actions runs without duplicates', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'github-signals-'));
+    const run = {
+        repository: 'org/core', id: 42, attempt: 1, workflowId: 7, workflow: 'CI', title: 'test change', event: 'pull_request',
+        status: 'completed', conclusion: 'success', createdAt: '2026-08-12T10:00:00Z', startedAt: '2026-08-12T10:00:10Z',
+        updatedAt: '2026-08-12T10:05:00Z', durationMs: 290000, queueMs: 10000, headSha: 'abc', headBranch: 'feature',
+        actor: 'octocat', url: 'https://github.com/org/core/actions/runs/42', pullRequests: [12],
+    };
+    assert.equal(await recordCiRuns(config, [run], dir), 1);
+    assert.equal(await recordCiRuns(config, [{ ...run, conclusion: 'failure' }], dir), 1);
+    const runs = loadCiRuns(config, 100, dir);
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].conclusion, 'failure');
+    assert.deepEqual(runs[0].pullRequests, [12]);
 });
 //# sourceMappingURL=history.test.js.map

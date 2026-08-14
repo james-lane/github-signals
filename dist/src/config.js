@@ -56,7 +56,6 @@ export function configPath(cwd = process.cwd()) {
 export function validateConfig(parsed = {}) {
     return {
         ...defaults,
-        ...parsed,
         hostname: validHostname(parsed.hostname),
         lookbackDays: boundedInteger(parsed.lookbackDays, defaults.lookbackDays, 1, 365),
         historyRetentionDays: boundedInteger(parsed.historyRetentionDays, defaults.historyRetentionDays, 1, 3650),
@@ -73,6 +72,9 @@ export function validateConfig(parsed = {}) {
         },
     };
 }
+export function serializeConfig(config) {
+    return `${JSON.stringify(validateConfig(config), null, 2)}\n`;
+}
 export async function loadConfig(cwd = process.cwd()) {
     try {
         const parsed = JSON.parse(await readFile(configPath(cwd), 'utf8'));
@@ -88,7 +90,7 @@ export async function saveConfig(config, cwd = process.cwd()) {
     const validated = validateConfig(config);
     Object.assign(config, validated);
     const filename = configPath(cwd);
-    await writeFile(filename, `${JSON.stringify(validated, null, 2)}\n`, { mode: 0o600 });
+    await writeFile(filename, serializeConfig(validated), { mode: 0o600 });
     await chmod(filename, 0o600);
 }
 export async function loadCache(cwd = process.cwd()) {

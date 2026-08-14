@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { chmod, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { defaults, loadConfig, saveConfig, THEMES } from '../src/config.js';
+import { defaults, loadConfig, saveConfig, serializeConfig, THEMES } from '../src/config.js';
 
 test('uses defaults in a new workspace', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'signals-'));
@@ -100,4 +100,20 @@ test('rejects unsafe identifiers and bounds numeric settings', async () => {
   assert.deepEqual(loaded.repositories, []);
   assert.equal(loaded.historyRetentionDays, 90);
   assert.equal(loaded.thresholds.stalePrDays, 3);
+});
+
+test('serializes a portable setup without cache or history data', () => {
+  const exported = JSON.parse(serializeConfig({
+    ...defaults,
+    theme: 'tva',
+    engineers: [{ id: 'octocat', name: 'Mona' }],
+    repositories: [{ name: 'github/example', priority: 'owned' }],
+    history: [{ capturedAt: 'private' }],
+    cache: { token: 'private' },
+  }));
+  assert.equal(exported.theme, 'tva');
+  assert.deepEqual(exported.engineers, [{ id: 'octocat', name: 'Mona' }]);
+  assert.deepEqual(exported.repositories, [{ name: 'github/example', priority: 'owned' }]);
+  assert.equal('history' in exported, false);
+  assert.equal('cache' in exported, false);
 });

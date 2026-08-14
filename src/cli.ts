@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // @ts-nocheck -- Incremental migration boundary for the stateful terminal UI.
 import { authStatus, fetchOpenPullRequests, fetchSignals, fetchWorkflowRunJobs, isRenovateAuthor, login, openEngineer, openGitHubUrl, openPullRequest, openRepositoryMetric } from './github.js';
-import { CACHE_FILE, CONFIG_FILE, engineerId, loadCache, loadConfig, repositoryName, saveCache, saveConfig, visibleRepositories } from './config.js';
+import { CACHE_FILE, CONFIG_FILE, engineerId, loadCache, loadConfig, repositoryName, saveCache, saveConfig, serializeConfig, visibleRepositories } from './config.js';
 import { HISTORY_FILE, loadCiRuns, loadEngineerFocusHistory, loadHistory, recordCiRuns, recordSnapshot } from './history.js';
 import { sanitizeTerminal } from './terminal.js';
 import { APP_VERSION } from './version.js';
+import { copyToClipboard } from './clipboard.js';
 
 const A = '\x1b[';
 const color = (n, s) => `${A}${n}m${s}${A}0m`;
@@ -201,7 +202,7 @@ class App {
       ? (this.currentView() === 'Repositories' ? '↑/↓ repo  ←/→ metric  Enter open  Esc nav'
         : this.currentView() === 'CI' ? '↑/↓ workflow  Enter runs  Esc nav'
         : this.currentView() === 'History' ? '↑/↓ snapshot  Esc nav'
-        : this.currentView() === 'Settings' ? (this.themeEditing ? '←/→ preview theme  Enter apply  Esc setting' : '↑/↓ setting  Enter edit  Esc nav')
+        : this.currentView() === 'Settings' ? (this.themeEditing ? '←/→ preview theme  Enter apply  Esc setting' : '↑/↓ setting  Enter edit  y copy setup  Esc nav')
           : '↑/↓ engineer  Enter open  Esc nav')
       : '←/→ views  Enter select';
     this.footer(this.refreshController ? this.refreshFooter() : (this.message || dim(`${navigation}${renovateToggle}  r refresh  a add  d delete  p priority  l login  q quit`)));
@@ -744,6 +745,13 @@ class App {
     });
     this.line();
     this.line(dim(`Enter Settings to make adjustments. Data stays local in ${CONFIG_FILE} and ${CACHE_FILE}.`));
+    this.line(dim('Press y to copy the complete portable setup. Cache and history are excluded.'));
+  }
+
+  async copySettings() {
+    await copyToClipboard(serializeConfig(this.config));
+    this.message = green('Setup copied to clipboard · cache and history excluded.');
+    this.render();
   }
 
   async editSelectedSetting() {
@@ -970,6 +978,9 @@ class App {
     }
     if (key === 'q') return this.quit();
     if (this.busy && !this.refreshController) return;
+    if (key === 'y' && this.currentView() === 'Settings' && !this.themeEditing) {
+      return this.runAction(() => this.copySettings());
+    }
     if (key === '\u001b' && this.prView) {
       this.prView = null;
       this.message = '';

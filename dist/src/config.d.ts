@@ -45,6 +45,7 @@ export declare function validateConfig(parsed?: {}): {
         workflowFailureCount: any;
     };
 };
+export declare function serializeConfig(config: any): string;
 export declare function loadConfig(cwd?: string): Promise<{
     hostname: string;
     lookbackDays: any;

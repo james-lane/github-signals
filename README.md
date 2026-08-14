@@ -25,6 +25,7 @@ On first launch, press `l` to run the normal `gh auth login` web flow. If you al
 - `Enter`: enter Engineers, Repositories, or Settings
 - `Enter` on Settings: enter settings; use `↑` / `↓` and `Enter` to edit a value
 - `←` / `→` while editing Theme: cycle themes with a live preview
+- `y` in Settings: copy the complete portable setup as JSON; cache and snapshot history are excluded
 - `Esc`: return from a focused view to the main navigation
 - `↑` / `↓` in a table: select an engineer or repository
 - `←` / `→` in Repositories: select a metric column

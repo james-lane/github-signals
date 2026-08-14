@@ -4,6 +4,7 @@ import { authStatus, fetchOpenPullRequests, fetchSignals, fetchWorkflowRunJobs, 
 import { CACHE_FILE, CONFIG_FILE, engineerId, loadCache, loadConfig, repositoryName, saveCache, saveConfig, visibleRepositories } from './config.js';
 import { HISTORY_FILE, loadCiRuns, loadEngineerFocusHistory, loadHistory, recordCiRuns, recordSnapshot } from './history.js';
 import { sanitizeTerminal } from './terminal.js';
+import { APP_VERSION } from './version.js';
 
 const A = '\x1b[';
 const color = (n, s) => `${A}${n}m${s}${A}0m`;
@@ -114,6 +115,12 @@ class App {
   }
 
   line(text = '') { process.stdout.write(`${fit(sanitizeTerminal(text), process.stdout.columns || 100)}${A}K\n`); }
+  footer(text) {
+    const width = process.stdout.columns || 100;
+    const version = dim(`v${APP_VERSION}`);
+    const left = fit(text, Math.max(1, width - strip(version).length - 1));
+    this.line(`${left}${' '.repeat(Math.max(1, width - strip(left).length - strip(version).length))}${version}`);
+  }
   errorLines(label, error) {
     const width = Math.max(40, process.stdout.columns || 100);
     const prefix = `${label} ${red('error')} `;
@@ -185,7 +192,7 @@ class App {
         : this.currentView() === 'Settings' ? (this.themeEditing ? '←/→ preview theme  Enter apply  Esc setting' : '↑/↓ setting  Enter edit  Esc nav')
           : '↑/↓ engineer  Enter open  Esc nav')
       : '←/→ views  Enter select';
-    this.line(this.message || dim(`${navigation}${renovateToggle}  r refresh  a add  d delete  p priority  l login  q quit`));
+    this.footer(this.message || dim(`${navigation}${renovateToggle}  r refresh  a add  d delete  p priority  l login  q quit`));
     // macOS Terminal may retain saved lines even in the alternate screen. Clear
     // only the active alternate buffer's scrollback after each full redraw.
     process.stdout.write(`${A}3J`);

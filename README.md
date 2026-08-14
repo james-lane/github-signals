@@ -111,3 +111,5 @@ npm run check
 `npm run build` compiles `src/` and `test/` into `dist/`. Commit the regenerated `dist/` output whenever TypeScript source changes so users can continue to run the checked-out application without installing packages. CI builds, tests, and verifies that the committed output is current.
 
 The app version comes from `package.json` and is always displayed at the bottom-right of the terminal. The tracked pre-push hook prevents application changes from being pushed without a version change. When needed, it increments the patch version in `package.json` and `package-lock.json`, stops the push, and asks you to commit that bump before retrying. Install the hook once per clone with `npm run hooks:install`.
+
+While the app is running, it sets a concise dynamic terminal title such as `GitHub Signals — Repositories`. Some terminals append profile-controlled details such as the working directory, active process, command line or dimensions. In macOS Terminal, open **Settings → Profiles → Window → Title** and disable those title components if you want only the app title.

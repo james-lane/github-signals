@@ -185,7 +185,7 @@ class App {
         if (!this.prompting && process.stdin.isTTY && !process.stdin.isRaw)
             process.stdin.setRawMode(true);
         const width = Math.max(60, process.stdout.columns || 100);
-        process.stdout.write(`${A}?25l${A}H${A}2J`);
+        process.stdout.write(`\x1b]0;GitHub Signals — ${this.currentView()}\x07${A}?25l${A}H${A}2J`);
         this.line(`${bold(cyan('◈ GitHub Signals'))}  ${this.auth.loggedIn ? green('● gh authenticated') : yellow('○ login required')}  ${dim(this.config.hostname)}`);
         this.line(dim('─'.repeat(width)));
         this.line(this.tabs.map((t, i) => i === this.tab ? bold(`[ ${t} ]`) : dim(`  ${t}  `)).join(' '));

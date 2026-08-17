@@ -1,4 +1,5 @@
 export const GITHUB_STATUS_URL = 'https://www.githubstatus.com/api/v2/status.json';
+export const GITHUB_STATUS_PAGE_URL = 'https://www.githubstatus.com/';
 
 const indicators = new Set(['none', 'minor', 'major', 'critical', 'maintenance']);
 

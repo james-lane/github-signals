@@ -7,7 +7,7 @@ import { sanitizeTerminal } from './terminal.js';
 import { APP_VERSION } from './version.js';
 import { copyToClipboard } from './clipboard.js';
 import { aggregateEngineerFocus, focusScore } from './focus.js';
-import { fetchGitHubStatus } from './github-status.js';
+import { fetchGitHubStatus, GITHUB_STATUS_PAGE_URL } from './github-status.js';
 const A = '\x1b[';
 const color = (n, s) => `${A}${n}m${s}${A}0m`;
 const themes = {
@@ -202,8 +202,12 @@ class App {
         process.stdout.write(`\x1b]0;GitHub Signals — ${this.currentView()}\x07${A}?25l${A}H${A}2J`);
         const headerLeft = `${bold(cyan('◈ GitHub Signals'))}  ${this.auth.loggedIn ? green('● gh authenticated') : yellow('○ login required')}  ${dim(this.config.hostname)}`;
         const headerRight = this.statusBadge();
-        const headerGap = Math.max(2, width - strip(headerLeft).length - strip(headerRight).length);
-        this.line(`${headerLeft}${' '.repeat(headerGap)}${headerRight}`);
+        // Keep clear of the terminal's auto-wrap column so the final status
+        // character survives redraws in macOS Terminal and similar emulators.
+        const headerWidth = width - 2;
+        const visibleHeaderRight = fit(headerRight, Math.max(1, headerWidth - strip(headerLeft).length - 2));
+        const headerGap = Math.max(2, headerWidth - strip(headerLeft).length - strip(visibleHeaderRight).length);
+        this.line(`${headerLeft}${' '.repeat(headerGap)}${visibleHeaderRight}`);
         this.line(dim('─'.repeat(width)));
         this.line(this.tabs.map((t, i) => i === this.tab ? bold(`[ ${t} ]`) : dim(`  ${t}  `)).join(' '));
         this.line();
@@ -232,7 +236,7 @@ class App {
                                     : this.currentView() === 'Settings' ? (this.themeEditing ? '←/→ preview theme  Enter apply  Esc setting' : '↑/↓ setting  Enter edit  y copy setup  Esc nav')
                                         : '↑/↓ engineer  Enter open  Esc nav')
                         : '←/→ views  Enter select';
-        this.footer(this.refreshController ? this.refreshFooter() : (this.message || dim(`${navigation}${renovateToggle}  r refresh  a add  d delete  p priority  l login  q quit`)));
+        this.footer(this.refreshController ? this.refreshFooter() : (this.message || dim(`${navigation}${renovateToggle}  r refresh  s status  a add  d delete  p priority  l login  q quit`)));
         // macOS Terminal may retain saved lines even in the alternate screen. Clear
         // only the active alternate buffer's scrollback after each full redraw.
         process.stdout.write(`${A}3J`);
@@ -1087,6 +1091,12 @@ class App {
             return this.quit();
         if (this.busy && !this.refreshController)
             return;
+        if (key === 's')
+            return this.runAction(async () => {
+                await openGitHubUrl(GITHUB_STATUS_PAGE_URL);
+                this.message = green('Opened GitHub Status.');
+                this.render();
+            });
         if (key === 'y' && this.currentView() === 'Settings' && !this.themeEditing) {
             return this.runAction(() => this.copySettings());
         }

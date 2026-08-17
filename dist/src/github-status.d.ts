@@ -1,4 +1,5 @@
 export declare const GITHUB_STATUS_URL = "https://www.githubstatus.com/api/v2/status.json";
+export declare const GITHUB_STATUS_PAGE_URL = "https://www.githubstatus.com/";
 export declare function parseGitHubStatus(payload: unknown): {
     indicator: string;
     description: string;

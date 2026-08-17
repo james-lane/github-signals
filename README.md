@@ -40,6 +40,7 @@ On first launch, press `l` to run the normal `gh auth login` web flow. If you al
 - `p`: toggle a repository between owned and contributing
 - `v` in Repositories or its PR view: show or hide Renovate-authored pull requests
 - `r`: refresh signals
+- `s`: open the GitHub Status webpage
 - `c`: cancel an in-progress refresh
 - `l`: authenticate with `gh`
 - `q`: quit

@@ -79,6 +79,8 @@ Legacy username strings remain supported; their ID is also used as their display
 
 Engineer activity includes default-branch commits, opened and merged pull requests, and reviewed pull requests over a configurable lookback. These counts are read directly from the repositories, so private organization activity is included when the authenticated account can access it. Repository health includes open/stale pull requests, pull requests whose GitHub review decision remains required beyond the configured wait threshold, open/stale issues, and the latest default-branch CI status.
 
+The Engineers screen shows the whole team's weighted system-focus distribution while the main navigation has focus. Enter the screen and select an engineer to switch the breakdown to that individual. Team `Eng days` is the sum of engineer-active days per repository, while focus remains weighted by commits, pull requests, merges, and reviews rather than elapsed hours.
+
 The highlighted engineer also shows a system-focus breakdown by repository: focus share, active days, commits, pull requests, merges, reviews, owned-repository share, and primary-system concentration. Focus uses a transparent activity weighting of commit `1`, pull request `3`, merge `2`, and review `2`. It describes where visible work happened, not hours worked or individual performance. Successful snapshots retain this repository breakdown so the primary-system share can be shown as a trend after new focus-aware snapshots have accumulated.
 
 Engineer and repository health are fetched together in small GraphQL batches. Refreshes run only when requested by the user, never poll in the background, and the overview shows the remaining GraphQL allowance and reset time.

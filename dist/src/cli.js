@@ -6,6 +6,7 @@ import { loadCiRuns, loadEngineerFocusHistory, loadHistory, recordCiRuns, record
 import { sanitizeTerminal } from './terminal.js';
 import { APP_VERSION } from './version.js';
 import { copyToClipboard } from './clipboard.js';
+import { aggregateEngineerFocus, focusScore } from './focus.js';
 const A = '\x1b[';
 const color = (n, s) => `${A}${n}m${s}${A}0m`;
 const themes = {
@@ -66,7 +67,6 @@ const percentile = (values, percentileValue) => {
         return null;
     return sorted[Math.min(sorted.length - 1, Math.ceil(percentileValue * sorted.length) - 1)];
 };
-const focusScore = item => (item.commits || 0) + (item.pullRequests || 0) * 3 + (item.merged || 0) * 2 + (item.reviews || 0) * 2;
 const sparkline = values => {
     const bars = '▁▂▃▄▅▆▇█';
     if (!values.length)
@@ -326,16 +326,23 @@ class App {
         });
         if (!this.config.engineers.length)
             this.line(dim('No engineers configured. Press a to add one.'));
-        const selectedEngineer = this.config.engineers[this.selection[1]];
-        const selectedSignal = selectedEngineer && this.data?.engineers?.find(value => value.login === engineerId(selectedEngineer));
-        if (selectedSignal && !selectedSignal.error)
-            this.engineerFocus(selectedEngineer, selectedSignal, engineerRows);
+        if (this.contentFocused) {
+            const selectedEngineer = this.config.engineers[this.selection[1]];
+            const selectedSignal = selectedEngineer && this.data?.engineers?.find(value => value.login === engineerId(selectedEngineer));
+            if (selectedSignal && !selectedSignal.error)
+                this.engineerFocus(selectedEngineer.name || `@${selectedSignal.login}`, selectedSignal, engineerRows, [selectedSignal.login]);
+        }
+        else if (this.config.engineers.length && this.data?.engineers) {
+            const configuredLogins = new Set(this.config.engineers.map(engineer => engineerId(engineer).toLowerCase()));
+            const teamSignals = this.data.engineers.filter(signal => configuredLogins.has(signal.login?.toLowerCase()));
+            this.engineerFocus('All engineers', aggregateEngineerFocus(teamSignals), engineerRows, [...configuredLogins], true);
+        }
     }
-    engineerFocus(engineer, signal, engineerRows) {
+    engineerFocus(label, signal, engineerRows, historyLogins, team = false) {
         this.line();
         const scored = (signal.repositories || []).map(repository => ({ ...repository, score: focusScore(repository) }))
             .filter(repository => repository.score > 0).sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
-        this.line(bold(`System focus · ${engineer.name || `@${signal.login}`}`));
+        this.line(bold(`System focus · ${label}`));
         if (!scored.length) {
             this.line(dim('No repository-level focus data cached yet. Press r to refresh.'));
             return;
@@ -347,22 +354,28 @@ class App {
         const ownedShare = Math.round(owned / total * 100);
         const concentration = primaryShare >= 75 ? 'high focus' : primaryShare >= 50 ? 'moderate focus' : scored.length >= 6 && primaryShare < 30 ? 'broadly distributed' : 'shared focus';
         const historyBySnapshot = new Map();
-        this.focusHistory.filter(row => row.login.toLowerCase() === signal.login.toLowerCase()).forEach(row => {
+        const includedLogins = new Set(historyLogins.map(login => login.toLowerCase()));
+        this.focusHistory.filter(row => includedLogins.has(row.login.toLowerCase())).forEach(row => {
             if (!historyBySnapshot.has(row.captured_at))
-                historyBySnapshot.set(row.captured_at, []);
-            historyBySnapshot.get(row.captured_at).push(focusScore({ commits: row.commits, pullRequests: row.pull_requests, merged: row.merged, reviews: row.reviews }));
+                historyBySnapshot.set(row.captured_at, new Map());
+            const repositories = historyBySnapshot.get(row.captured_at);
+            repositories.set(row.repository, (repositories.get(row.repository) || 0) + focusScore({ commits: row.commits, pullRequests: row.pull_requests, merged: row.merged, reviews: row.reviews }));
         });
-        const concentrationTrend = [...historyBySnapshot.values()].map(scores => scores.length ? Math.round(Math.max(...scores) / scores.reduce((sum, score) => sum + score, 0) * 100) : 0);
+        const concentrationTrend = [...historyBySnapshot.values()].map(repositories => {
+            const scores = [...repositories.values()];
+            return scores.length ? Math.round(Math.max(...scores) / scores.reduce((sum, score) => sum + score, 0) * 100) : 0;
+        });
         this.line(`${cyan(String(scored.length))} active systems · ${cyan(`${ownedShare}%`)} owned · primary ${cyan(`${primaryShare}%`)} · ${yellow(concentration)}${concentrationTrend.length ? ` · ${cyan(sparkline(concentrationTrend))} ${dim('primary share')}` : ''}`);
         const terminalWidth = process.stdout.columns || 100;
-        const nameWidth = Math.max(20, terminalWidth - 58);
-        this.line(dim(`${cell('Repository', nameWidth)} ${cell('Focus', 19)} ${cell('Days', 5)} ${cell('Commits', 7)} ${cell('PRs', 4)} ${cell('Merged', 7)} Reviews`));
+        const daysWidth = team ? 8 : 5;
+        const nameWidth = Math.max(20, terminalWidth - 53 - daysWidth);
+        this.line(dim(`${cell('Repository', nameWidth)} ${cell('Focus', 19)} ${cell(team ? 'Eng days' : 'Days', daysWidth)} ${cell('Commits', 7)} ${cell('PRs', 4)} ${cell('Merged', 7)} Reviews`));
         const repositoryRows = Math.max(2, Math.min(6, (process.stdout.rows || 40) - engineerRows - 17));
         scored.slice(0, repositoryRows).forEach(repository => {
             const share = Math.round(repository.score / total * 100);
             const bar = `${'█'.repeat(Math.round(share / 10))}${'░'.repeat(10 - Math.round(share / 10))}`;
             const shortName = repository.name.split('/').pop();
-            this.line(`${cell(shortName, nameWidth)} ${cell(`${bar} ${share}%`, 19)} ${cell(repository.activeDays || '—', 5)} ${cell(repository.commits, 7)} ${cell(repository.pullRequests, 4)} ${cell(repository.merged, 7)} ${repository.reviews}`);
+            this.line(`${cell(shortName, nameWidth)} ${cell(`${bar} ${share}%`, 19)} ${cell(repository.activeDays || '—', daysWidth)} ${cell(repository.commits, 7)} ${cell(repository.pullRequests, 4)} ${cell(repository.merged, 7)} ${repository.reviews}`);
         });
         if (scored.length > repositoryRows)
             this.line(dim(`${scored.length - repositoryRows} more systems not shown`));

@@ -7,6 +7,7 @@ import { sanitizeTerminal } from './terminal.js';
 import { APP_VERSION } from './version.js';
 import { copyToClipboard } from './clipboard.js';
 import { aggregateEngineerFocus, focusScore } from './focus.js';
+import { fetchGitHubStatus } from './github-status.js';
 
 const A = '\x1b[';
 const color = (n, s) => `${A}${n}m${s}${A}0m`;
@@ -100,6 +101,9 @@ class App {
     this.ciSelection = 0;
     this.ciView = null;
     this.showRenovatePullRequests = true;
+    this.githubStatus = null;
+    this.statusTimer = null;
+    this.stopped = false;
     setTheme(config.theme);
     this.tabs = this.buildTabs();
   }
@@ -117,6 +121,13 @@ class App {
   }
 
   line(text = '') { process.stdout.write(`${fit(sanitizeTerminal(text), process.stdout.columns || 100)}${A}K\n`); }
+  statusBadge() {
+    if (!this.githubStatus) return dim('GitHub status ◌ checking');
+    const { indicator, description } = this.githubStatus;
+    if (indicator === 'unavailable') return dim('GitHub status ○ unavailable');
+    const marker = indicator === 'none' ? green('●') : indicator === 'minor' || indicator === 'maintenance' ? yellow('●') : red('●');
+    return `${dim('GitHub status')} ${marker} ${indicator === 'none' ? green(description) : indicator === 'minor' || indicator === 'maintenance' ? yellow(description) : red(description)}`;
+  }
   footer(text) {
     const width = process.stdout.columns || 100;
     // Avoid the terminal's final column: writing into it can trigger auto-wrap
@@ -182,7 +193,10 @@ class App {
     if (!this.prompting && process.stdin.isTTY && !process.stdin.isRaw) process.stdin.setRawMode(true);
     const width = Math.max(60, process.stdout.columns || 100);
     process.stdout.write(`\x1b]0;GitHub Signals — ${this.currentView()}\x07${A}?25l${A}H${A}2J`);
-    this.line(`${bold(cyan('◈ GitHub Signals'))}  ${this.auth.loggedIn ? green('● gh authenticated') : yellow('○ login required')}  ${dim(this.config.hostname)}`);
+    const headerLeft = `${bold(cyan('◈ GitHub Signals'))}  ${this.auth.loggedIn ? green('● gh authenticated') : yellow('○ login required')}  ${dim(this.config.hostname)}`;
+    const headerRight = this.statusBadge();
+    const headerGap = Math.max(2, width - strip(headerLeft).length - strip(headerRight).length);
+    this.line(`${headerLeft}${' '.repeat(headerGap)}${headerRight}`);
     this.line(dim('─'.repeat(width)));
     this.line(this.tabs.map((t, i) => i === this.tab ? bold(`[ ${t} ]`) : dim(`  ${t}  `)).join(' '));
     this.line();
@@ -1085,8 +1099,21 @@ class App {
     process.stdout.on('resize', () => { if (!this.prompting) this.render(); });
     process.on('SIGTERM', () => this.quit());
     this.render();
+    this.updateGitHubStatus();
+    this.statusTimer = setInterval(() => this.updateGitHubStatus(), 60000);
+    this.statusTimer.unref();
+  }
+  async updateGitHubStatus() {
+    try {
+      this.githubStatus = await fetchGitHubStatus();
+    } catch {
+      this.githubStatus = { indicator: 'unavailable', description: 'Unavailable', checkedAt: new Date().toISOString() };
+    }
+    if (!this.stopped && !this.prompting) this.render();
   }
   quit() {
+    this.stopped = true;
+    if (this.statusTimer) clearInterval(this.statusTimer);
     this.refreshController?.abort();
     process.stdin.setRawMode(false);
     process.stdin.pause();

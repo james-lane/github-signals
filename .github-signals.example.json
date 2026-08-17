@@ -4,6 +4,7 @@
   "lookbackDays": 14,
   "showContributingRepositories": false,
   "ciEnabled": false,
+  "githubStatusEnabled": true,
   "historyRetentionDays": 90,
   "engineers": [
     {

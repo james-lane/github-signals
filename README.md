@@ -2,7 +2,7 @@
 
 A zero-install terminal dashboard for team activity and repository health. It uses the GitHub CLI for authentication and API access, so it inherits access to private and enterprise repositories from your existing `gh` login.
 
-The header also checks GitHub's public Statuspage API once a minute and shows the current platform status at the top right. This check is asynchronous, has a five-second timeout, is not stored in history, and falls back to `unavailable` without interrupting the app.
+The header also checks GitHub's public Statuspage API once a minute and shows the current platform status at the top right. This check is enabled by default, asynchronous, has a five-second timeout, is not stored in history, and falls back to `unavailable` without interrupting the app. Toggle `GitHub status` in Settings or set `"githubStatusEnabled": false` to disable it.
 
 The dashboard runs in the terminal's alternate screen and clears that screen's saved lines after redraws. This keeps dashboard history out of scrollback while restoring the shell's previous contents and scrollback when it exits.
 

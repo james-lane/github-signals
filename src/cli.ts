@@ -10,6 +10,7 @@ import { aggregateEngineerFocus, focusScore } from './focus.js';
 import { fetchGitHubStatus, GITHUB_STATUS_PAGE_URL } from './github-status.js';
 
 const A = '\x1b[';
+const SETTINGS_COUNT = 11;
 const color = (n, s) => `${A}${n}m${s}${A}0m`;
 const themes = {
   default: { accent: '36', success: '32', warning: '33', error: '31', muted: '2', selectedRow: '48;5;236', selectedCell: '30;46' },
@@ -122,6 +123,7 @@ class App {
 
   line(text = '') { process.stdout.write(`${fit(sanitizeTerminal(text), process.stdout.columns || 100)}${A}K\n`); }
   statusBadge() {
+    if (!this.config.githubStatusEnabled) return '';
     if (!this.githubStatus) return dim('GitHub status ◌ checking');
     const { indicator, description } = this.githubStatus;
     if (indicator === 'unavailable') return dim('GitHub status ○ unavailable');
@@ -197,10 +199,12 @@ class App {
     const headerRight = this.statusBadge();
     // Keep clear of the terminal's auto-wrap column so the final status
     // character survives redraws in macOS Terminal and similar emulators.
-    const headerWidth = width - 2;
-    const visibleHeaderRight = fit(headerRight, Math.max(1, headerWidth - strip(headerLeft).length - 2));
-    const headerGap = Math.max(2, headerWidth - strip(headerLeft).length - strip(visibleHeaderRight).length);
-    this.line(`${headerLeft}${' '.repeat(headerGap)}${visibleHeaderRight}`);
+    if (headerRight) {
+      const headerWidth = width - 2;
+      const visibleHeaderRight = fit(headerRight, Math.max(1, headerWidth - strip(headerLeft).length - 2));
+      const headerGap = Math.max(2, headerWidth - strip(headerLeft).length - strip(visibleHeaderRight).length);
+      this.line(`${headerLeft}${' '.repeat(headerGap)}${visibleHeaderRight}`);
+    } else this.line(headerLeft);
     this.line(dim('─'.repeat(width)));
     this.line(this.tabs.map((t, i) => i === this.tab ? bold(`[ ${t} ]`) : dim(`  ${t}  `)).join(' '));
     this.line();
@@ -760,6 +764,7 @@ class App {
       ['Activity lookback', `${cyan(this.config.lookbackDays)} days`],
       ['Contributing repos', this.config.showContributingRepositories ? green('shown') : dim('hidden (owned only)')],
       ['CI visibility', this.config.ciEnabled ? green('enabled') : dim('disabled')],
+      ['GitHub status', this.config.githubStatusEnabled ? green('enabled') : dim('disabled')],
       ['Stale pull request', `${cyan(t.stalePrDays)} days without an update`],
       ['Review wait', `${cyan(t.reviewWaitHours)} hours`],
       ['Stale issue', `${cyan(t.staleIssueDays)} days without an update`],
@@ -806,10 +811,23 @@ class App {
       this.message = green(`CI visibility ${this.config.ciEnabled ? 'enabled' : 'disabled'}.`);
       return this.render();
     }
+    if (this.settingsSelection === 5) {
+      this.config.githubStatusEnabled = !this.config.githubStatusEnabled;
+      await saveConfig(this.config);
+      if (this.config.githubStatusEnabled) this.startGitHubStatusPolling();
+      else {
+        if (this.statusTimer) clearInterval(this.statusTimer);
+        this.statusTimer = null;
+        this.githubStatus = null;
+      }
+      this.message = green(`GitHub status ${this.config.githubStatusEnabled ? 'enabled' : 'disabled'}.`);
+      return this.render();
+    }
     const fields = [
       ['GitHub hostname', this.config.hostname, value => { this.config.hostname = value; }],
       null,
       ['Activity lookback (days)', this.config.lookbackDays, value => { this.config.lookbackDays = Number(value) || 14; }],
+      null,
       null,
       null,
       ['Stale PR threshold (days)', t.stalePrDays, value => { t.stalePrDays = Number(value) || 3; }],
@@ -1053,7 +1071,7 @@ class App {
     if (key === '\u001b[A' && this.contentFocused && !this.themeEditing) {
       if (this.prView) this.prView.selection = Math.max(0, this.prView.selection - 1);
       else if (this.currentView() === 'CI') this.moveCiSelection(-1);
-      else if (this.currentView() === 'Settings') this.settingsSelection = (this.settingsSelection + 9) % 10;
+      else if (this.currentView() === 'Settings') this.settingsSelection = (this.settingsSelection + SETTINGS_COUNT - 1) % SETTINGS_COUNT;
       else if (this.currentView() === 'History') this.historySelection = Math.min(this.history.length - 1, this.historySelection + 1);
       else this.moveSelection(-1);
     }
@@ -1063,7 +1081,7 @@ class App {
         this.prView.selection = Math.min(visibleCount - 1, this.prView.selection + 1);
       }
       else if (this.currentView() === 'CI') this.moveCiSelection(1);
-      else if (this.currentView() === 'Settings') this.settingsSelection = (this.settingsSelection + 1) % 10;
+      else if (this.currentView() === 'Settings') this.settingsSelection = (this.settingsSelection + 1) % SETTINGS_COUNT;
       else if (this.currentView() === 'History') this.historySelection = Math.max(0, this.historySelection - 1);
       else this.moveSelection(1);
     }
@@ -1108,6 +1126,10 @@ class App {
     process.stdout.on('resize', () => { if (!this.prompting) this.render(); });
     process.on('SIGTERM', () => this.quit());
     this.render();
+    if (this.config.githubStatusEnabled) this.startGitHubStatusPolling();
+  }
+  startGitHubStatusPolling() {
+    if (this.statusTimer) clearInterval(this.statusTimer);
     this.updateGitHubStatus();
     this.statusTimer = setInterval(() => this.updateGitHubStatus(), 60000);
     this.statusTimer.unref();

@@ -8,6 +8,7 @@ import { defaults, loadConfig, saveConfig, serializeConfig, THEMES } from '../sr
 test('uses defaults in a new workspace', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'signals-'));
   assert.deepEqual(await loadConfig(dir), defaults);
+  assert.equal((await loadConfig(dir)).githubStatusEnabled, true);
 });
 
 test('merges persisted thresholds with defaults', async () => {
@@ -30,6 +31,14 @@ test('CI visibility is opt-in', async () => {
   assert.equal((await loadConfig(dir)).ciEnabled, true);
   await saveConfig({ ...defaults, ciEnabled: 'yes' }, dir);
   assert.equal((await loadConfig(dir)).ciEnabled, false);
+});
+
+test('GitHub status is enabled by default and can be disabled', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'signals-'));
+  await saveConfig({ ...defaults, githubStatusEnabled: false }, dir);
+  assert.equal((await loadConfig(dir)).githubStatusEnabled, false);
+  await saveConfig({ ...defaults, githubStatusEnabled: true }, dir);
+  assert.equal((await loadConfig(dir)).githubStatusEnabled, true);
 });
 
 test('accepts TVA theme and rejects unknown themes', async () => {

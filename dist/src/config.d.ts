@@ -6,6 +6,7 @@ export declare const defaults: {
     theme: string;
     showContributingRepositories: boolean;
     ciEnabled: boolean;
+    githubStatusEnabled: boolean;
     historyRetentionDays: number;
     engineers: never[];
     repositories: never[];
@@ -35,6 +36,7 @@ export declare function validateConfig(parsed?: {}): {
     historyRetentionDays: any;
     showContributingRepositories: boolean;
     ciEnabled: boolean;
+    githubStatusEnabled: boolean;
     theme: any;
     engineers: any;
     repositories: any;
@@ -52,6 +54,7 @@ export declare function loadConfig(cwd?: string): Promise<{
     historyRetentionDays: any;
     showContributingRepositories: boolean;
     ciEnabled: boolean;
+    githubStatusEnabled: boolean;
     theme: any;
     engineers: any;
     repositories: any;

@@ -30,6 +30,7 @@ const themeNames = {
 let palette = themes.default;
 const setTheme = name => { palette = themes[name] || themes.default; };
 const cyan = s => color(palette.accent, s);
+const orange = s => color('38;5;208', s);
 const green = s => color(palette.success, s);
 const yellow = s => color(palette.warning, s);
 const red = s => color(palette.error, s);
@@ -206,7 +207,11 @@ class App {
       this.line(`${headerLeft}${' '.repeat(headerGap)}${visibleHeaderRight}`);
     } else this.line(headerLeft);
     this.line(dim('─'.repeat(width)));
-    this.line(this.tabs.map((t, i) => i === this.tab ? bold(`[ ${t} ]`) : dim(`  ${t}  `)).join(' '));
+    this.line(this.tabs.map((t, i) => {
+      if (i !== this.tab) return dim(`  ${t}  `);
+      const selected = bold(`[ ${t} ]`);
+      return this.contentFocused ? orange(selected) : selected;
+    }).join(' '));
     this.line();
     if (this.currentView() === 'Overview') this.overview();
     if (this.currentView() === 'Engineers') this.engineers();

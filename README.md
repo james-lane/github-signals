@@ -25,6 +25,7 @@ On first launch, press `l` to run the normal `gh auth login` web flow. If you al
 
 - `←` / `→` or `Tab`: switch screens from the main navigation
 - `Enter`: enter Engineers, Repositories, or Settings
+- The active navigation item turns orange while its view has keyboard focus
 - `Enter` on Settings: enter settings; use `↑` / `↓` and `Enter` to edit a value
 - `←` / `→` while editing Theme: cycle themes with a live preview
 - `y` in Settings: copy the complete portable setup as JSON; cache and snapshot history are excluded

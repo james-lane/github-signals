@@ -1,6 +1,6 @@
 {
   "name": "github-signals",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "private": true,
   "description": "A terminal dashboard for GitHub team activity and repository health",
   "type": "module",

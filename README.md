@@ -36,6 +36,7 @@ On first launch, press `l` to run the normal `gh auth login` web flow. If you al
 - `Enter` in a table: open the selected profile, repository, or filtered metric page
 - `Enter` on a repository's Open PRs metric: inspect its pull requests in the terminal; use `↑` / `↓`, `Enter` to open on the web, and `Esc` to return
 - `Enter` in CI: drill from workflow metrics into recent runs, then into job and step timing; `Esc` moves back one level
+- `w` in CI or the pull-request drill-down: open the selected workflow, run, job, or pull request on GitHub
 - `a`: add an engineer or repository
 - `d`: remove an item from the Engineers or Repositories screen
 - `p`: toggle a repository between owned and contributing

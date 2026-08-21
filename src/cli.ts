@@ -8,6 +8,7 @@ import { APP_VERSION } from './version.js';
 import { copyToClipboard } from './clipboard.js';
 import { aggregateEngineerFocus, focusScore } from './focus.js';
 import { fetchGitHubStatus, GITHUB_STATUS_PAGE_URL } from './github-status.js';
+import { ciContextWebUrl } from './web-navigation.js';
 
 const A = '\x1b[';
 const SETTINGS_COUNT = 11;
@@ -222,12 +223,12 @@ class App {
     this.line();
     this.line(dim('─'.repeat(width)));
     const renovateToggle = (this.prView || this.currentView() === 'Repositories') ? `  v Renovate ${this.showRenovatePullRequests ? 'shown' : 'hidden'}` : '';
-    const navigation = this.prView ? '↑/↓ pull request  Enter open on web  Esc repositories'
-      : this.currentView() === 'CI' && this.ciView?.type === 'run' ? '↑/↓ job  Enter open on web  Esc runs'
-      : this.currentView() === 'CI' && this.ciView?.type === 'workflow' ? '↑/↓ run  Enter jobs  Esc workflows'
+    const navigation = this.prView ? '↑/↓ pull request  Enter open  w web  Esc repositories'
+      : this.currentView() === 'CI' && this.ciView?.type === 'run' ? '↑/↓ job  Enter open  w web  Esc runs'
+      : this.currentView() === 'CI' && this.ciView?.type === 'workflow' ? '↑/↓ run  Enter jobs  w web  Esc workflows'
       : this.contentFocused
       ? (this.currentView() === 'Repositories' ? '↑/↓ repo  ←/→ metric  Enter open  Esc nav'
-        : this.currentView() === 'CI' ? '↑/↓ workflow  Enter runs  Esc nav'
+        : this.currentView() === 'CI' ? '↑/↓ workflow  Enter runs  w web  Esc nav'
         : this.currentView() === 'History' ? '↑/↓ snapshot  Esc nav'
         : this.currentView() === 'Settings' ? (this.themeEditing ? '←/→ preview theme  Enter apply  Esc setting' : '↑/↓ setting  Enter edit  y copy setup  Esc nav')
           : '↑/↓ engineer  Enter open  Esc nav')
@@ -738,6 +739,25 @@ class App {
     this.render();
   }
 
+  async openCurrentOnWeb() {
+    if (this.prView) {
+      const visiblePullRequests = this.prView.pullRequests.filter(pr => this.showRenovatePullRequests || !isRenovateAuthor(pr.author?.login));
+      const pullRequest = visiblePullRequests[this.prView.selection];
+      if (!pullRequest) return;
+      await openGitHubUrl(pullRequest.url);
+      this.message = green(`Opened ${this.prView.repository}#${pullRequest.number}.`);
+      return this.render();
+    }
+    if (this.currentView() !== 'CI') return;
+    const group = this.ciView?.group || this.ciWorkflowGroups()[this.ciSelection];
+    if (!group) return;
+    const run = this.ciView?.type === 'workflow' ? group.runs[this.ciView.selection] : this.ciView?.type === 'run' ? this.ciView.run : undefined;
+    const job = this.ciView?.type === 'run' ? this.ciView.jobs[this.ciView.selection] : undefined;
+    await openGitHubUrl(ciContextWebUrl(this.config.hostname, group, run, job));
+    this.message = green(`Opened ${job?.name || run?.title || group.workflow}.`);
+    this.render();
+  }
+
   async openSelected() {
     const items = this.selectableItems();
     if (!items.length) return;
@@ -1036,6 +1056,7 @@ class App {
       this.message = green('Opened GitHub Status.');
       this.render();
     });
+    if (key === 'w' && (this.prView || this.currentView() === 'CI')) return this.runAction(() => this.openCurrentOnWeb());
     if (key === 'y' && this.currentView() === 'Settings' && !this.themeEditing) {
       return this.runAction(() => this.copySettings());
     }

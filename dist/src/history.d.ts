@@ -11,6 +11,7 @@ export declare function loadCiRuns(config: any, limitPerRepository?: number, cwd
     id: import("node:sqlite").SQLOutputValue;
     attempt: import("node:sqlite").SQLOutputValue;
     workflowId: import("node:sqlite").SQLOutputValue;
+    workflowPath: import("node:sqlite").SQLOutputValue;
     workflow: import("node:sqlite").SQLOutputValue;
     title: import("node:sqlite").SQLOutputValue;
     event: import("node:sqlite").SQLOutputValue;

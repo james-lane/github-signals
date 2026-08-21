@@ -42,7 +42,7 @@ test('does not store partial snapshots', async () => {
 test('stores and updates GitHub Actions runs without duplicates', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'github-signals-'));
     const run = {
-        repository: 'org/core', id: 42, attempt: 1, workflowId: 7, workflow: 'CI', title: 'test change', event: 'pull_request',
+        repository: 'org/core', id: 42, attempt: 1, workflowId: 7, workflowPath: '.github/workflows/ci.yml', workflow: 'CI', title: 'test change', event: 'pull_request',
         status: 'completed', conclusion: 'success', createdAt: '2026-08-12T10:00:00Z', startedAt: '2026-08-12T10:00:10Z',
         updatedAt: '2026-08-12T10:05:00Z', durationMs: 290000, queueMs: 10000, headSha: 'abc', headBranch: 'feature',
         actor: 'octocat', url: 'https://github.com/org/core/actions/runs/42', pullRequests: [12],
@@ -52,6 +52,7 @@ test('stores and updates GitHub Actions runs without duplicates', async () => {
     const runs = loadCiRuns(config, 100, dir);
     assert.equal(runs.length, 1);
     assert.equal(runs[0].conclusion, 'failure');
+    assert.equal(runs[0].workflowPath, '.github/workflows/ci.yml');
     assert.deepEqual(runs[0].pullRequests, [12]);
 });
 //# sourceMappingURL=history.test.js.map

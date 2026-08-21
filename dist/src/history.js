@@ -64,6 +64,7 @@ function openHistory(cwd = process.cwd()) {
       run_id INTEGER NOT NULL,
       attempt INTEGER NOT NULL,
       workflow_id INTEGER,
+      workflow_path TEXT,
       workflow TEXT NOT NULL,
       title TEXT NOT NULL,
       event TEXT,
@@ -86,6 +87,9 @@ function openHistory(cwd = process.cwd()) {
     DELETE FROM repository_metrics WHERE snapshot_id NOT IN (SELECT id FROM snapshots);
     DELETE FROM engineer_repository_metrics WHERE snapshot_id NOT IN (SELECT id FROM snapshots);
   `);
+    const ciColumns = db.prepare('PRAGMA table_info(ci_runs)').all();
+    if (!ciColumns.some(column => column.name === 'workflow_path'))
+        db.exec('ALTER TABLE ci_runs ADD COLUMN workflow_path TEXT');
     for (const suffix of ['-wal', '-shm']) {
         try {
             chmodSync(`${filename}${suffix}`, 0o600);
@@ -172,18 +176,19 @@ export async function recordCiRuns(config, runs, cwd = process.cwd()) {
     const db = openHistory(cwd);
     try {
         const insert = db.prepare(`INSERT INTO ci_runs
-      (repository, run_id, attempt, workflow_id, workflow, title, event, status, conclusion, created_at, started_at, updated_at,
+      (repository, run_id, attempt, workflow_id, workflow_path, workflow, title, event, status, conclusion, created_at, started_at, updated_at,
        duration_ms, queue_ms, head_sha, head_branch, actor, url, pull_requests)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(repository, run_id, attempt) DO UPDATE SET
        status=excluded.status, conclusion=excluded.conclusion, updated_at=excluded.updated_at,
-       duration_ms=excluded.duration_ms, queue_ms=excluded.queue_ms, pull_requests=excluded.pull_requests`);
+       duration_ms=excluded.duration_ms, queue_ms=excluded.queue_ms, workflow_path=excluded.workflow_path,
+       pull_requests=excluded.pull_requests`);
         db.exec('BEGIN');
         let count = 0;
         for (const run of runs) {
             if (run.error || !run.id)
                 continue;
-            insert.run(run.repository, run.id, run.attempt, run.workflowId, run.workflow, run.title, run.event, run.status, run.conclusion, run.createdAt, run.startedAt, run.updatedAt, run.durationMs, run.queueMs, run.headSha, run.headBranch, run.actor, run.url, JSON.stringify(run.pullRequests || []));
+            insert.run(run.repository, run.id, run.attempt, run.workflowId, run.workflowPath, run.workflow, run.title, run.event, run.status, run.conclusion, run.createdAt, run.startedAt, run.updatedAt, run.durationMs, run.queueMs, run.headSha, run.headBranch, run.actor, run.url, JSON.stringify(run.pullRequests || []));
             count++;
         }
         const cutoff = new Date(Date.now() - config.historyRetentionDays * 86400000).toISOString();
@@ -214,7 +219,7 @@ export function loadCiRuns(config, limitPerRepository = 100, cwd = process.cwd()
         for (const repository of repositories)
             rows.push(...select.all(repository, limitPerRepository));
         return rows.map(row => ({
-            repository: row.repository, id: row.run_id, attempt: row.attempt, workflowId: row.workflow_id,
+            repository: row.repository, id: row.run_id, attempt: row.attempt, workflowId: row.workflow_id, workflowPath: row.workflow_path,
             workflow: row.workflow, title: row.title, event: row.event, status: row.status, conclusion: row.conclusion,
             createdAt: row.created_at, startedAt: row.started_at, updatedAt: row.updated_at,
             durationMs: row.duration_ms, queueMs: row.queue_ms, headSha: row.head_sha, headBranch: row.head_branch,

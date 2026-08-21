@@ -2,10 +2,12 @@ export declare function workflowWebUrl(hostname: string, group: {
     repository: string;
     latest?: {
         workflowId?: string | number;
+        workflowPath?: string;
         url?: string;
     };
     runs?: Array<{
         workflowId?: string | number;
+        workflowPath?: string;
         url?: string;
     }>;
 }): string;

@@ -18,6 +18,7 @@ export declare function fetchActionsSignals(config: any, onProgress?: () => void
     id: any;
     attempt: any;
     workflowId: any;
+    workflowPath: any;
     workflow: any;
     title: any;
     event: any;
@@ -40,6 +41,7 @@ export declare function fetchActionsSignals(config: any, onProgress?: () => void
     id?: undefined;
     attempt?: undefined;
     workflowId?: undefined;
+    workflowPath?: undefined;
     workflow?: undefined;
     title?: undefined;
     event?: undefined;
@@ -56,6 +58,7 @@ export declare function fetchActionsSignals(config: any, onProgress?: () => void
     url?: undefined;
     pullRequests?: undefined;
 })[]>;
+export declare function fetchWorkflowPath(repository: any, workflowId: any, hostname: any, signal: any): Promise<any>;
 export declare function fetchWorkflowRunJobs(repository: any, runId: any, hostname: any, signal: any): Promise<any>;
 export declare function fetchOpenPullRequests(fullName: any, hostname: any, signal: any): Promise<{
     totalCount: any;
@@ -74,6 +77,7 @@ export declare function fetchSignals(config: any, onProgress?: () => void, { sig
         id: any;
         attempt: any;
         workflowId: any;
+        workflowPath: any;
         workflow: any;
         title: any;
         event: any;
@@ -96,6 +100,7 @@ export declare function fetchSignals(config: any, onProgress?: () => void, { sig
         id?: undefined;
         attempt?: undefined;
         workflowId?: undefined;
+        workflowPath?: undefined;
         workflow?: undefined;
         title?: undefined;
         event?: undefined;

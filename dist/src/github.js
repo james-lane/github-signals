@@ -125,6 +125,7 @@ export async function fetchActionsSignals(config, onProgress = () => { }, { sign
                     id: run.id,
                     attempt: run.run_attempt || 1,
                     workflowId: run.workflow_id,
+                    workflowPath: run.path,
                     workflow: run.name || run.display_title || 'Workflow',
                     title: run.display_title || run.name || 'Workflow run',
                     event: run.event,
@@ -152,6 +153,10 @@ export async function fetchActionsSignals(config, onProgress = () => { }, { sign
             await pacedWait(100, signal);
     }
     return runs;
+}
+export async function fetchWorkflowPath(repository, workflowId, hostname, signal) {
+    const workflow = await api(hostname, `/repos/${repository}/actions/workflows/${workflowId}`, {}, signal);
+    return workflow.path || null;
 }
 export async function fetchWorkflowRunJobs(repository, runId, hostname, signal) {
     const result = await api(hostname, `/repos/${repository}/actions/runs/${runId}/jobs`, { filter: 'latest', per_page: 100 }, signal);

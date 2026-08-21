@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // @ts-nocheck -- Incremental migration boundary for the stateful terminal UI.
-import { authStatus, fetchOpenPullRequests, fetchSignals, fetchWorkflowRunJobs, isRenovateAuthor, login, openEngineer, openGitHubUrl, openPullRequest, openRepositoryMetric } from './github.js';
+import { authStatus, fetchOpenPullRequests, fetchSignals, fetchWorkflowPath, fetchWorkflowRunJobs, isRenovateAuthor, login, openEngineer, openGitHubUrl, openPullRequest, openRepositoryMetric } from './github.js';
 import { CACHE_FILE, CONFIG_FILE, engineerId, loadCache, loadConfig, repositoryName, saveCache, saveConfig, serializeConfig, visibleRepositories } from './config.js';
 import { HISTORY_FILE, loadCiRuns, loadEngineerFocusHistory, loadHistory, recordCiRuns, recordSnapshot } from './history.js';
 import { sanitizeTerminal } from './terminal.js';
@@ -751,6 +751,12 @@ class App {
     if (this.currentView() !== 'CI') return;
     const group = this.ciView?.group || this.ciWorkflowGroups()[this.ciSelection];
     if (!group) return;
+    if (!this.ciView && !group.latest?.workflowPath && group.latest?.workflowId) {
+      this.message = cyan(`Resolving ${group.workflow} workflow file…`);
+      this.render();
+      const workflowPath = await fetchWorkflowPath(group.repository, group.latest.workflowId, this.config.hostname);
+      if (workflowPath) group.runs.filter(item => item.workflowId === group.latest.workflowId).forEach(item => { item.workflowPath = workflowPath; });
+    }
     const run = this.ciView?.type === 'workflow' ? group.runs[this.ciView.selection] : this.ciView?.type === 'run' ? this.ciView.run : undefined;
     const job = this.ciView?.type === 'run' ? this.ciView.jobs[this.ciView.selection] : undefined;
     await openGitHubUrl(ciContextWebUrl(this.config.hostname, group, run, job));

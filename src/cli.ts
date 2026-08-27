@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // @ts-nocheck -- Incremental migration boundary for the stateful terminal UI.
-import { authStatus, fetchOpenPullRequests, fetchSignals, fetchWorkflowPath, fetchWorkflowRunJobs, isRenovateAuthor, login, openEngineer, openGitHubUrl, openPullRequest, openRepositoryMetric } from './github.js';
+import { authStatus, fetchOpenPullRequests, fetchOrganizationCommits, fetchSignals, fetchWorkflowPath, fetchWorkflowRunJobs, isRenovateAuthor, login, openEngineer, openGitHubUrl, openPullRequest, openRepositoryMetric } from './github.js';
 import { CACHE_FILE, CONFIG_FILE, engineerId, loadCache, loadConfig, repositoryName, saveCache, saveConfig, serializeConfig, visibleRepositories } from './config.js';
 import { HISTORY_FILE, loadCiRuns, loadEngineerFocusHistory, loadHistory, recordCiRuns, recordSnapshot } from './history.js';
 import { sanitizeTerminal } from './terminal.js';
@@ -11,7 +11,8 @@ import { fetchGitHubStatus, GITHUB_STATUS_PAGE_URL } from './github-status.js';
 import { ciContextWebUrl } from './web-navigation.js';
 
 const A = '\x1b[';
-const SETTINGS_COUNT = 11;
+const SETTINGS_COUNT = 12;
+const COMMIT_PAGE_SIZE = 20;
 const color = (n, s) => `${A}${n}m${s}${A}0m`;
 const themes = {
   default: { accent: '36', success: '32', warning: '33', error: '31', muted: '2', selectedRow: '48;5;236', selectedCell: '30;46' },
@@ -105,6 +106,7 @@ class App {
     this.ciView = null;
     this.showRenovatePullRequests = true;
     this.githubStatus = null;
+    this.commitLedger = { loaded: false, commits: [], repositories: 0, errors: [], page: 0, selection: 0, filters: { repository: '', author: '', branch: '' } };
     this.statusTimer = null;
     this.stopped = false;
     setTheme(config.theme);
@@ -112,7 +114,7 @@ class App {
   }
 
   buildTabs() {
-    return ['Overview', 'Engineers', 'Repositories', ...(this.config.ciEnabled && this.config.repositories.length ? ['CI'] : []), ...(this.history.length ? ['History'] : []), 'Settings'];
+    return ['Overview', 'Engineers', 'Repositories', ...(this.config.organization ? ['Commits'] : []), ...(this.config.ciEnabled && this.config.repositories.length ? ['CI'] : []), ...(this.history.length ? ['History'] : []), 'Settings'];
   }
 
   currentView() { return this.tabs[this.tab]; }
@@ -217,6 +219,7 @@ class App {
     if (this.currentView() === 'Overview') this.overview();
     if (this.currentView() === 'Engineers') this.engineers();
     if (this.currentView() === 'Repositories') this.prView ? this.pullRequestsView() : this.repositories();
+    if (this.currentView() === 'Commits') this.commitsView();
     if (this.currentView() === 'CI') this.ciView ? this.ciDetailView() : this.ciOverview();
     if (this.currentView() === 'History') this.historyView();
     if (this.currentView() === 'Settings') this.settings();
@@ -228,6 +231,7 @@ class App {
       : this.currentView() === 'CI' && this.ciView?.type === 'workflow' ? '↑/↓ run  Enter jobs  w web  Esc workflows'
       : this.contentFocused
       ? (this.currentView() === 'Repositories' ? '↑/↓ repo  ←/→ metric  Enter open  Esc nav'
+        : this.currentView() === 'Commits' ? '↑/↓ commit  ←/→ page  f filters  Enter/w web  Esc nav'
         : this.currentView() === 'CI' ? '↑/↓ workflow  Enter runs  w web  Esc nav'
         : this.currentView() === 'History' ? '↑/↓ snapshot  Esc nav'
         : this.currentView() === 'Settings' ? (this.themeEditing ? '←/→ preview theme  Enter apply  Esc setting' : '↑/↓ setting  Enter edit  y copy setup  Esc nav')
@@ -787,6 +791,83 @@ class App {
     this.render();
   }
 
+  filteredCommits() {
+    const filters = this.commitLedger.filters;
+    return this.commitLedger.commits.filter(commit =>
+      (!filters.repository || commit.repository.toLowerCase().includes(filters.repository.toLowerCase()))
+      && (!filters.author || commit.author.toLowerCase().includes(filters.author.toLowerCase()))
+      && (!filters.branch || commit.branch.toLowerCase() === filters.branch.toLowerCase()));
+  }
+
+  commitPage() {
+    const commits = this.filteredCommits();
+    const pages = Math.max(1, Math.ceil(commits.length / COMMIT_PAGE_SIZE));
+    this.commitLedger.page = Math.min(this.commitLedger.page, pages - 1);
+    return { commits, pages, rows: commits.slice(this.commitLedger.page * COMMIT_PAGE_SIZE, (this.commitLedger.page + 1) * COMMIT_PAGE_SIZE) };
+  }
+
+  commitsView() {
+    const ledger = this.commitLedger;
+    this.line(bold(`Organization commit ledger · ${this.config.organization}`));
+    if (!ledger.loaded) {
+      this.line(dim('Enter to load commits from every non-archived repository in the organization.'));
+      this.line(dim('Scope: latest 100 commits on each repository’s default branch.'));
+      return;
+    }
+    const { commits, pages, rows } = this.commitPage();
+    const activeFilters = Object.entries(ledger.filters).filter(([, value]) => value).map(([key, value]) => `${key}=${value}`).join(' · ');
+    this.line(dim(`${ledger.commits.length} commits from ${ledger.repositories} repositories · page ${ledger.page + 1}/${pages} · latest 100 per default branch${activeFilters ? ` · ${activeFilters}` : ''}`));
+    if (ledger.errors.length) this.line(yellow(`${ledger.errors.length} repositories could not be read`));
+    const width = Math.max(80, process.stdout.columns || 100);
+    const repoWidth = Math.max(18, Math.min(48, Math.floor(width * 0.25)));
+    const branchWidth = 12, authorWidth = 18, dateWidth = 17, shaWidth = 8;
+    const messageWidth = Math.max(12, width - repoWidth - branchWidth - authorWidth - dateWidth - shaWidth - 8);
+    this.line(dim(`${cell('Date', dateWidth)} ${cell('Repository', repoWidth)} ${cell('Branch', branchWidth)} ${cell('Author', authorWidth)} ${cell('SHA', shaWidth)} ${cell('Change', messageWidth)}`));
+    rows.forEach((commit, index) => {
+      const selected = this.contentFocused && index === ledger.selection;
+      const date = commit.committedAt ? new Date(commit.committedAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : 'unknown';
+      const row = `${selected ? '›' : ' '} ${cell(date, dateWidth)} ${cell(commit.repository, repoWidth)} ${cell(commit.branch, branchWidth)} ${cell(commit.author, authorWidth)} ${cell(commit.sha.slice(0, 7), shaWidth)} ${cell(commit.message, messageWidth)}`;
+      this.line(selected ? selectedRow(row) : row);
+    });
+    if (!rows.length) this.line(yellow(commits.length ? 'No commits on this page.' : 'No commits match the current filters. Press f to change them.'));
+  }
+
+  async loadCommitLedger() {
+    this.message = cyan(`Loading ${this.config.organization} commit ledger…`);
+    this.render();
+    const result = await fetchOrganizationCommits(this.config, message => {
+      this.message = cyan(message);
+      this.render();
+    });
+    Object.assign(this.commitLedger, result, { loaded: true, page: 0, selection: 0 });
+    this.message = result.errors.length ? yellow(`Ledger loaded with ${result.errors.length} repository errors.`) : green('Organization commit ledger loaded.');
+    this.render();
+  }
+
+  async filterCommitLedger() {
+    const clearHint = 'use * to clear';
+    const repository = await this.prompt(`Repository contains (${clearHint})`, this.commitLedger.filters.repository);
+    const author = await this.prompt(`Author contains (${clearHint})`, this.commitLedger.filters.author);
+    const branch = await this.prompt(`Default branch (${clearHint})`, this.commitLedger.filters.branch);
+    this.commitLedger.filters = {
+      repository: repository === '*' ? '' : repository,
+      author: author === '*' ? '' : author.replace(/^@/, ''),
+      branch: branch === '*' ? '' : branch,
+    };
+    this.commitLedger.page = 0;
+    this.commitLedger.selection = 0;
+    this.message = green('Commit filters applied.');
+    this.render();
+  }
+
+  async openCommitOnWeb() {
+    const row = this.commitPage().rows[this.commitLedger.selection];
+    if (!row) return;
+    await openGitHubUrl(row.url);
+    this.message = green(`Opened ${row.repository}@${row.sha.slice(0, 7)}.`);
+    this.render();
+  }
+
   settings() {
     const t = this.config.thresholds;
     const rows = [
@@ -801,6 +882,7 @@ class App {
       ['Stale issue', `${cyan(t.staleIssueDays)} days without an update`],
       ['Recent CI failures', `last ${cyan(t.workflowFailureCount)} failed runs`],
       ['History retention', `${cyan(this.config.historyRetentionDays)} days`],
+      ['Commit ledger org', this.config.organization ? cyan(this.config.organization) : dim('not configured')],
     ];
     this.line(bold('Configuration'));
     rows.forEach(([label, value], index) => {
@@ -866,6 +948,7 @@ class App {
       ['Stale issue threshold (days)', t.staleIssueDays, value => { t.staleIssueDays = Number(value) || 14; }],
       ['Recent CI failure count', t.workflowFailureCount, value => { t.workflowFailureCount = Number(value) || 1; }],
       ['History retention (days)', this.config.historyRetentionDays, value => { this.config.historyRetentionDays = Number(value) || 90; }],
+      ['GitHub organization (* disables commit ledger)', this.config.organization, value => { this.config.organization = value === '*' ? '' : value; }],
     ];
     const [question, current, apply] = fields[this.settingsSelection];
     apply(await this.prompt(question, String(current)));
@@ -1062,7 +1145,9 @@ class App {
       this.message = green('Opened GitHub Status.');
       this.render();
     });
+    if (key === 'w' && this.currentView() === 'Commits' && this.contentFocused) return this.runAction(() => this.openCommitOnWeb());
     if (key === 'w' && (this.prView || this.currentView() === 'CI')) return this.runAction(() => this.openCurrentOnWeb());
+    if (key === 'f' && this.currentView() === 'Commits' && this.contentFocused && this.commitLedger.loaded) return this.runAction(() => this.filterCommitLedger());
     if (key === 'y' && this.currentView() === 'Settings' && !this.themeEditing) {
       return this.runAction(() => this.copySettings());
     }
@@ -1090,18 +1175,28 @@ class App {
     if (key === '\t' && !this.contentFocused) this.tab = (this.tab + 1) % this.tabs.length;
     if (key === '\u001b[C') {
       if (this.prView) { /* PR drill-down uses vertical list navigation. */ }
+      else if (this.contentFocused && this.currentView() === 'Commits' && this.commitLedger.loaded) {
+        const pages = Math.max(1, Math.ceil(this.filteredCommits().length / COMMIT_PAGE_SIZE));
+        this.commitLedger.page = Math.min(pages - 1, this.commitLedger.page + 1);
+        this.commitLedger.selection = 0;
+      }
       else if (this.contentFocused && this.currentView() === 'Repositories') this.repositoryMetric = Math.min(6, this.repositoryMetric + 1);
       else if (this.contentFocused && this.currentView() === 'Settings' && this.themeEditing) return this.runAction(() => this.cycleTheme(1));
       else if (!this.contentFocused) this.tab = (this.tab + 1) % this.tabs.length;
     }
     if (key === '\u001b[D') {
       if (this.prView) { /* PR drill-down uses vertical list navigation. */ }
+      else if (this.contentFocused && this.currentView() === 'Commits' && this.commitLedger.loaded) {
+        this.commitLedger.page = Math.max(0, this.commitLedger.page - 1);
+        this.commitLedger.selection = 0;
+      }
       else if (this.contentFocused && this.currentView() === 'Repositories') this.repositoryMetric = Math.max(0, this.repositoryMetric - 1);
       else if (this.contentFocused && this.currentView() === 'Settings' && this.themeEditing) return this.runAction(() => this.cycleTheme(-1));
       else if (!this.contentFocused) this.tab = (this.tab + this.tabs.length - 1) % this.tabs.length;
     }
     if (key === '\u001b[A' && this.contentFocused && !this.themeEditing) {
       if (this.prView) this.prView.selection = Math.max(0, this.prView.selection - 1);
+      else if (this.currentView() === 'Commits') this.commitLedger.selection = Math.max(0, this.commitLedger.selection - 1);
       else if (this.currentView() === 'CI') this.moveCiSelection(-1);
       else if (this.currentView() === 'Settings') this.settingsSelection = (this.settingsSelection + SETTINGS_COUNT - 1) % SETTINGS_COUNT;
       else if (this.currentView() === 'History') this.historySelection = Math.min(this.history.length - 1, this.historySelection + 1);
@@ -1112,6 +1207,7 @@ class App {
         const visibleCount = this.prView.pullRequests.filter(pr => this.showRenovatePullRequests || !isRenovateAuthor(pr.author?.login)).length;
         this.prView.selection = Math.min(visibleCount - 1, this.prView.selection + 1);
       }
+      else if (this.currentView() === 'Commits') this.commitLedger.selection = Math.max(0, Math.min(this.commitPage().rows.length - 1, this.commitLedger.selection + 1));
       else if (this.currentView() === 'CI') this.moveCiSelection(1);
       else if (this.currentView() === 'Settings') this.settingsSelection = (this.settingsSelection + 1) % SETTINGS_COUNT;
       else if (this.currentView() === 'History') this.historySelection = Math.max(0, this.historySelection - 1);
@@ -1138,10 +1234,12 @@ class App {
         this.message = green(`Opened ${this.prView.repository}#${pr.number}.`);
         this.render();
       });
-      if (!this.contentFocused && ((this.currentView() === 'Engineers' || this.currentView() === 'Repositories') ? this.selectableItems().length : (this.currentView() === 'CI' ? this.ciWorkflowGroups().length : (this.currentView() === 'Settings' || (this.currentView() === 'History' && this.history.length))))) {
+      if (!this.contentFocused && ((this.currentView() === 'Engineers' || this.currentView() === 'Repositories') ? this.selectableItems().length : (this.currentView() === 'Commits' ? true : (this.currentView() === 'CI' ? this.ciWorkflowGroups().length : (this.currentView() === 'Settings' || (this.currentView() === 'History' && this.history.length)))))) {
         this.contentFocused = true;
+        if (this.currentView() === 'Commits' && !this.commitLedger.loaded) return this.runAction(() => this.loadCommitLedger());
         return this.render();
       }
+      if (this.contentFocused && this.currentView() === 'Commits') return this.runAction(() => this.openCommitOnWeb());
       if (this.contentFocused && this.currentView() === 'CI') return this.runAction(() => this.openCiSelected());
       if (this.contentFocused && this.currentView() === 'Settings') return this.runAction(() => this.editSelectedSetting());
       if (this.contentFocused) return this.runAction(() => this.openSelected());

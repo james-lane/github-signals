@@ -7,6 +7,7 @@ export const CACHE_FILE = '.github-signals-cache.json';
 
 export const defaults = {
   hostname: 'github.com',
+  organization: '',
   lookbackDays: 14,
   theme: 'default',
   showContributingRepositories: false,
@@ -32,6 +33,10 @@ const boundedInteger = (value, fallback, min, max) => {
 const validHostname = value => {
   const hostname = cleanText(value).toLowerCase();
   return /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(hostname) ? hostname : defaults.hostname;
+};
+const validOrganization = value => {
+  const organization = cleanText(value);
+  return /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/.test(organization) ? organization : '';
 };
 
 export function normalizeRepository(repository) {
@@ -65,6 +70,7 @@ export function validateConfig(parsed = {}) {
   return {
     ...defaults,
     hostname: validHostname(parsed.hostname),
+    organization: validOrganization(parsed.organization),
     lookbackDays: boundedInteger(parsed.lookbackDays, defaults.lookbackDays, 1, 365),
     historyRetentionDays: boundedInteger(parsed.historyRetentionDays, defaults.historyRetentionDays, 1, 3650),
     showContributingRepositories: parsed.showContributingRepositories === true,

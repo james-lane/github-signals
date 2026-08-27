@@ -24,7 +24,7 @@ On first launch, press `l` to run the normal `gh auth login` web flow. If you al
 ## Controls
 
 - `←` / `→` or `Tab`: switch screens from the main navigation
-- `Enter`: enter Engineers, Repositories, or Settings
+- `Enter`: enter Engineers, Repositories, Commits, CI, History, or Settings
 - The active navigation item turns orange while its view has keyboard focus
 - `Enter` on Settings: enter settings; use `↑` / `↓` and `Enter` to edit a value
 - `←` / `→` while editing Theme: cycle themes with a live preview
@@ -37,6 +37,8 @@ On first launch, press `l` to run the normal `gh auth login` web flow. If you al
 - `Enter` on a repository's Open PRs metric: inspect its pull requests in the terminal; use `↑` / `↓`, `Enter` to open on the web, and `Esc` to return
 - `Enter` in CI: drill from workflow metrics into recent runs, then into job and step timing; `Esc` moves back one level
 - `w` in CI or the pull-request drill-down: open the selected workflow, run, job, or pull request on GitHub
+- `f` in Commits: filter the loaded ledger by repository, author, or default branch; use `*` to clear a filter
+- `←` / `→` in Commits: move through ledger pages; `Enter` or `w` opens the selected commit on GitHub
 - `a`: add an engineer or repository
 - `d`: remove an item from the Engineers or Repositories screen
 - `p`: toggle a repository between owned and contributing
@@ -50,6 +52,8 @@ On first launch, press `l` to run the normal `gh auth login` web flow. If you al
 Configuration, the last successful result, and historical snapshots are stored as `.github-signals.json`, `.github-signals-cache.json`, and `.github-signals-history.sqlite`. These files are ignored by Git and created with owner-only permissions. Tokens are never read or stored by the app. A sanitized [.github-signals.example.json](.github-signals.example.json) documents the complete configuration shape.
 
 GitHub Actions visibility is opt-in because it adds one bounded REST request per in-scope repository during refresh. Enable `CI visibility` in Settings or set `"ciEnabled": true`; it defaults to `false`.
+
+Set `"organization"` (for example, `"cinch-labs"`) or edit **Commit ledger org** in Settings to enable the Commits page. The ledger is independent of the configured repository list: it enumerates every accessible, non-archived repository in that organization and loads the latest 100 commits from each repository's default branch. Results are merged chronologically, paginated locally, and filterable by repository, author, or default branch (`main`, `master`, and so on). Loading happens only when the page is first entered, because organization-wide collection can require one GitHub request per repository. This is a diagnostic recent-change ledger rather than a complete archive of every feature-branch commit.
 
 Successful refreshes store aggregated engineer and repository metrics in SQLite. Cancelled or partially failed refreshes are not recorded, snapshots within 15 minutes are deduplicated, and data older than the configurable retention period (90 days by default) is pruned. History is matched to the active scope and thresholds before it is used for dashboard sparklines.
 

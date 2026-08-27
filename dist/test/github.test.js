@@ -1,12 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { engineerSignalsFromRepositories, isRenovateAuthor } from '../src/github.js';
+import { engineerSignalsFromRepositories, isRenovateAuthor, normalizeOrganizationCommit } from '../src/github.js';
 test('recognizes Renovate pull request authors without hiding approval bots', () => {
     assert.equal(isRenovateAuthor('renovate'), true);
     assert.equal(isRenovateAuthor('renovate[bot]'), true);
     assert.equal(isRenovateAuthor('Renovate'), true);
     assert.equal(isRenovateAuthor('renovate-approve'), false);
     assert.equal(isRenovateAuthor('developer'), false);
+});
+test('normalizes an organization commit using its repository default branch', () => {
+    assert.deepEqual(normalizeOrganizationCommit({
+        sha: 'abcdef123456',
+        html_url: 'https://github.com/acme/service/commit/abcdef123456',
+        author: { login: 'octocat' },
+        commit: { message: 'Fix production issue\n\nMore detail', committer: { date: '2026-08-27T10:00:00Z' } },
+    }, { full_name: 'acme/service', default_branch: 'main' }), {
+        sha: 'abcdef123456', repository: 'acme/service', branch: 'main', author: 'octocat',
+        committedAt: '2026-08-27T10:00:00Z', message: 'Fix production issue',
+        url: 'https://github.com/acme/service/commit/abcdef123456',
+    });
 });
 test('derives private repository engineer activity from repository nodes', () => {
     const activity = [{

@@ -8,6 +8,7 @@ test('uses defaults in a new workspace', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'signals-'));
     assert.deepEqual(await loadConfig(dir), defaults);
     assert.equal((await loadConfig(dir)).githubStatusEnabled, true);
+    assert.equal((await loadConfig(dir)).organization, '');
 });
 test('merges persisted thresholds with defaults', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'signals-'));
@@ -28,6 +29,13 @@ test('CI visibility is opt-in', async () => {
     assert.equal((await loadConfig(dir)).ciEnabled, true);
     await saveConfig({ ...defaults, ciEnabled: 'yes' }, dir);
     assert.equal((await loadConfig(dir)).ciEnabled, false);
+});
+test('validates the optional organization used by the commit ledger', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'signals-'));
+    await saveConfig({ ...defaults, organization: 'cinch-labs' }, dir);
+    assert.equal((await loadConfig(dir)).organization, 'cinch-labs');
+    await saveConfig({ ...defaults, organization: '../unsafe' }, dir);
+    assert.equal((await loadConfig(dir)).organization, '');
 });
 test('GitHub status is enabled by default and can be disabled', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'signals-'));

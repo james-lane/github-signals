@@ -21,6 +21,7 @@ export declare function normalizeOrganizationCommit(item: any, repository: any):
     url: any;
     organization: any;
 };
+export declare function fetchRepositoryCommits(repository: any, branch: any, hostname: any, signal: any): Promise<any>;
 export declare function fetchOrganizationCommits(config: any, cursors?: {}, onProgress?: () => void, { signal }?: {}): Promise<{
     commits: any[];
     repositories: number;

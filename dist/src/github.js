@@ -121,6 +121,14 @@ export function normalizeOrganizationCommit(item, repository) {
         organization: repository?.owner?.login || repository.full_name.split('/')[0],
     };
 }
+export async function fetchRepositoryCommits(repository, branch, hostname, signal) {
+    const items = await api(hostname, `/repos/${repository}/commits`, { sha: branch, per_page: 20 }, signal);
+    return items.map(item => normalizeOrganizationCommit(item, {
+        full_name: repository,
+        default_branch: branch,
+        owner: { login: repository.split('/')[0] },
+    }));
+}
 export async function fetchOrganizationCommits(config, cursors = {}, onProgress = () => { }, { signal } = {}) {
     if (!config.organizations?.length)
         return { commits: [], repositories: 0, activeRepositories: 0, errors: [] };

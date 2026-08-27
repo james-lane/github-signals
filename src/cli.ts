@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // @ts-nocheck -- Incremental migration boundary for the stateful terminal UI.
-import { authStatus, fetchOpenPullRequests, fetchOrganizationCommits, fetchSignals, fetchWorkflowPath, fetchWorkflowRunJobs, isRenovateAuthor, login, openEngineer, openGitHubUrl, openPullRequest, openRepositoryMetric } from './github.js';
+import { authStatus, fetchOpenPullRequests, fetchOrganizationCommits, fetchRepositoryCommits, fetchSignals, fetchWorkflowPath, fetchWorkflowRunJobs, isRenovateAuthor, login, openEngineer, openGitHubUrl, openPullRequest, openRepositoryMetric } from './github.js';
 import { CACHE_FILE, CONFIG_FILE, engineerId, loadCache, loadConfig, repositoryName, saveCache, saveConfig, serializeConfig, visibleRepositories } from './config.js';
 import { clearStoredData, HISTORY_FILE, loadCiRuns, loadEngineerFocusHistory, loadHistory, loadOrganizationCommitCursors, loadOrganizationCommits, recordCiRuns, recordOrganizationCommits, recordSnapshot } from './history.js';
 import { sanitizeTerminal } from './terminal.js';
@@ -106,7 +106,7 @@ class App {
     this.ciView = null;
     this.showRenovatePullRequests = true;
     this.githubStatus = null;
-    this.commitLedger = { loaded: true, commits: organizationCommits, repositories: new Set(organizationCommits.map(commit => commit.repository)).size, activeRepositories: 0, errors: [], page: 0, selection: 0, filters: { repository: '', author: '', branch: '' } };
+    this.commitLedger = { loaded: true, commits: organizationCommits, focusedCommits: null, repositories: new Set(organizationCommits.map(commit => commit.repository)).size, activeRepositories: 0, errors: [], page: 0, selection: 0, repositoryFilter: '' };
     this.statusTimer = null;
     this.stopped = false;
     setTheme(config.theme);
@@ -231,7 +231,7 @@ class App {
       : this.currentView() === 'CI' && this.ciView?.type === 'workflow' ? '↑/↓ run  Enter jobs  w web  Esc workflows'
       : this.contentFocused
       ? (this.currentView() === 'Repositories' ? '↑/↓ repo  ←/→ metric  Enter open  Esc nav'
-        : this.currentView() === 'Commits' ? '↑/↓ commit  ←/→ page  f filters  Enter/w web  Esc nav'
+        : this.currentView() === 'Commits' ? '↑/↓ commit  ←/→ page  f repo focus  Enter/w web  Esc nav'
         : this.currentView() === 'CI' ? '↑/↓ workflow  Enter runs  w web  Esc nav'
         : this.currentView() === 'History' ? '↑/↓ snapshot  Esc nav'
         : this.currentView() === 'Settings' ? (this.themeEditing ? '←/→ preview theme  Enter apply  Esc setting' : '↑/↓ setting  Enter edit  y copy setup  x clear data  Esc nav')
@@ -792,11 +792,7 @@ class App {
   }
 
   filteredCommits() {
-    const filters = this.commitLedger.filters;
-    return this.commitLedger.commits.filter(commit =>
-      (!filters.repository || commit.repository.toLowerCase().includes(filters.repository.toLowerCase()))
-      && (!filters.author || commit.author.toLowerCase().includes(filters.author.toLowerCase()))
-      && (!filters.branch || commit.branch.toLowerCase() === filters.branch.toLowerCase()));
+    return this.commitLedger.focusedCommits || this.commitLedger.commits;
   }
 
   commitPage() {
@@ -810,8 +806,10 @@ class App {
     const ledger = this.commitLedger;
     this.line(bold(`Organization commit ledger · ${this.config.organizations.join(', ')}`));
     const { commits, pages, rows } = this.commitPage();
-    const activeFilters = Object.entries(ledger.filters).filter(([, value]) => value).map(([key, value]) => `${key}=${value}`).join(' · ');
-    this.line(dim(`${ledger.commits.length} commits · ${this.config.commitLedgerDays}-day window · ${ledger.repositories} active repositories · page ${ledger.page + 1}/${pages} · default branches${activeFilters ? ` · ${activeFilters}` : ''}`));
+    const scope = ledger.repositoryFilter
+      ? `${commits.length} latest commits · ${ledger.repositoryFilter} · fetched on demand`
+      : `${ledger.commits.length} commits · ${this.config.commitLedgerDays}-day window · ${ledger.repositories} active repositories`;
+    this.line(dim(`${scope} · page ${ledger.page + 1}/${pages} · default branches`));
     if (ledger.errors.length) this.line(yellow(`${ledger.errors.length} repositories could not be read`));
     const width = Math.max(80, process.stdout.columns || 100);
     const repoWidth = Math.max(18, Math.min(48, Math.floor(width * 0.25)));
@@ -824,22 +822,27 @@ class App {
       const row = `${selected ? '›' : ' '} ${cell(date, dateWidth)} ${cell(commit.repository, repoWidth)} ${cell(commit.branch, branchWidth)} ${cell(commit.author, authorWidth)} ${cell(commit.sha.slice(0, 7), shaWidth)} ${cell(commit.message, messageWidth)}`;
       this.line(selected ? selectedRow(row) : row);
     });
-    if (!rows.length) this.line(yellow(commits.length ? 'No commits on this page.' : `No cached commits match. Press r to refresh the last ${this.config.commitLedgerDays} day${this.config.commitLedgerDays === 1 ? '' : 's'}.`));
+    if (!rows.length) this.line(yellow(`No cached commits. Press r to refresh the last ${this.config.commitLedgerDays} day${this.config.commitLedgerDays === 1 ? '' : 's'}.`));
   }
 
   async filterCommitLedger() {
-    const clearHint = 'use * to clear';
-    const repository = await this.prompt(`Repository contains (${clearHint})`, this.commitLedger.filters.repository);
-    const author = await this.prompt(`Author contains (${clearHint})`, this.commitLedger.filters.author);
-    const branch = await this.prompt(`Default branch (${clearHint})`, this.commitLedger.filters.branch);
-    this.commitLedger.filters = {
-      repository: repository === '*' ? '' : repository,
-      author: author === '*' ? '' : author.replace(/^@/, ''),
-      branch: branch === '*' ? '' : branch,
-    };
+    if (this.commitLedger.repositoryFilter) {
+      this.commitLedger.repositoryFilter = '';
+      this.commitLedger.focusedCommits = null;
+      this.commitLedger.page = 0;
+      this.commitLedger.selection = 0;
+      this.message = green('Returned to the organization ledger.');
+      return this.render();
+    }
+    const selected = this.commitPage().rows[this.commitLedger.selection];
+    if (!selected) return;
+    this.message = cyan(`Loading the latest 20 commits for ${selected.repository}…`);
+    this.render();
+    this.commitLedger.focusedCommits = await fetchRepositoryCommits(selected.repository, selected.branch, this.config.hostname);
+    this.commitLedger.repositoryFilter = selected.repository;
     this.commitLedger.page = 0;
     this.commitLedger.selection = 0;
-    this.message = green('Commit filters applied.');
+    this.message = green(`Showing the latest ${this.commitLedger.focusedCommits.length} commits for ${selected.repository}.`);
     this.render();
   }
 
@@ -1091,6 +1094,8 @@ class App {
         }, { signal: controller.signal });
         await recordOrganizationCommits(this.config, ledgerResult.commits);
         this.commitLedger.commits = loadOrganizationCommits(this.config);
+        this.commitLedger.focusedCommits = null;
+        this.commitLedger.repositoryFilter = '';
         this.commitLedger.repositories = new Set(this.commitLedger.commits.map(commit => commit.repository)).size;
         this.commitLedger.activeRepositories = ledgerResult.activeRepositories;
         this.commitLedger.errors = ledgerResult.errors;
@@ -1143,7 +1148,7 @@ class App {
     clearStoredData(section);
     if (section === 'snapshots' || section === 'all') { this.history = []; this.focusHistory = []; }
     if (section === 'ci' || section === 'all') this.ciRuns = [];
-    if (section === 'commits' || section === 'all') Object.assign(this.commitLedger, { commits: [], repositories: 0, errors: [], page: 0, selection: 0 });
+    if (section === 'commits' || section === 'all') Object.assign(this.commitLedger, { commits: [], focusedCommits: null, repositoryFilter: '', repositories: 0, errors: [], page: 0, selection: 0 });
     this.message = green(`${section} database data cleared. Configuration and cache retained.`);
     this.render();
   }

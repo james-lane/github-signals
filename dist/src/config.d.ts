@@ -2,7 +2,8 @@ export declare const CONFIG_FILE = ".github-signals.json";
 export declare const CACHE_FILE = ".github-signals-cache.json";
 export declare const defaults: {
     hostname: string;
-    organization: string;
+    organizations: never[];
+    commitLedgerDays: number;
     lookbackDays: number;
     theme: string;
     showContributingRepositories: boolean;
@@ -33,7 +34,8 @@ export declare const engineerId: (engineer: any) => string;
 export declare function configPath(cwd?: string): string;
 export declare function validateConfig(parsed?: {}): {
     hostname: string;
-    organization: string;
+    organizations: unknown[];
+    commitLedgerDays: any;
     lookbackDays: any;
     historyRetentionDays: any;
     showContributingRepositories: boolean;
@@ -52,7 +54,8 @@ export declare function validateConfig(parsed?: {}): {
 export declare function serializeConfig(config: any): string;
 export declare function loadConfig(cwd?: string): Promise<{
     hostname: string;
-    organization: string;
+    organizations: unknown[];
+    commitLedgerDays: any;
     lookbackDays: any;
     historyRetentionDays: any;
     showContributingRepositories: boolean;

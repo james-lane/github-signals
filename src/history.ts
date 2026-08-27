@@ -86,6 +86,20 @@ function openHistory(cwd = process.cwd()) {
       PRIMARY KEY (repository, run_id, attempt)
     );
     CREATE INDEX IF NOT EXISTS ci_runs_repo_time ON ci_runs(repository, created_at DESC);
+    CREATE TABLE IF NOT EXISTS organization_commits (
+      hostname TEXT NOT NULL,
+      organization TEXT NOT NULL,
+      repository TEXT NOT NULL,
+      sha TEXT NOT NULL,
+      branch TEXT NOT NULL,
+      author TEXT NOT NULL,
+      committed_at TEXT NOT NULL,
+      message TEXT NOT NULL,
+      url TEXT NOT NULL,
+      PRIMARY KEY (hostname, organization, repository, sha)
+    );
+    CREATE INDEX IF NOT EXISTS organization_commits_scope_time
+      ON organization_commits(hostname, organization, committed_at DESC);
     DELETE FROM engineer_metrics WHERE snapshot_id NOT IN (SELECT id FROM snapshots);
     DELETE FROM repository_metrics WHERE snapshot_id NOT IN (SELECT id FROM snapshots);
     DELETE FROM engineer_repository_metrics WHERE snapshot_id NOT IN (SELECT id FROM snapshots);
@@ -205,6 +219,70 @@ export function loadCiRuns(config, limitPerRepository = 100, cwd = process.cwd()
       durationMs: row.duration_ms, queueMs: row.queue_ms, headSha: row.head_sha, headBranch: row.head_branch,
       actor: row.actor, url: row.url, pullRequests: JSON.parse(row.pull_requests || '[]'),
     }));
+  } finally { db.close(); }
+}
+
+export async function recordOrganizationCommits(config, commits, cwd = process.cwd()) {
+  const db = openHistory(cwd);
+  try {
+    const insert = db.prepare(`INSERT INTO organization_commits
+      (hostname, organization, repository, sha, branch, author, committed_at, message, url)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(hostname, organization, repository, sha) DO UPDATE SET
+        branch=excluded.branch, author=excluded.author, committed_at=excluded.committed_at,
+        message=excluded.message, url=excluded.url`);
+    db.exec('BEGIN');
+    for (const commit of commits || []) insert.run(config.hostname, commit.organization, commit.repository, commit.sha,
+      commit.branch, commit.author, commit.committedAt, commit.message, commit.url);
+    const cutoff = new Date(Date.now() - config.commitLedgerDays * 86400000).toISOString();
+    db.prepare('DELETE FROM organization_commits WHERE hostname = ? AND committed_at < ?').run(config.hostname, cutoff);
+    db.exec('COMMIT');
+    await chmod(path.join(cwd, HISTORY_FILE), 0o600);
+    return commits?.length || 0;
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch {}
+    throw error;
+  } finally { db.close(); }
+}
+
+export function loadOrganizationCommits(config, cwd = process.cwd()) {
+  if (!config.organizations?.length) return [];
+  const db = openHistory(cwd);
+  try {
+    const cutoff = new Date(Date.now() - config.commitLedgerDays * 86400000).toISOString();
+    const placeholders = config.organizations.map(() => '?').join(',');
+    return db.prepare(`SELECT organization, repository, sha, branch, author, committed_at, message, url
+      FROM organization_commits
+      WHERE hostname = ? AND organization IN (${placeholders}) AND committed_at >= ?
+      ORDER BY committed_at DESC`).all(config.hostname, ...config.organizations, cutoff)
+      .map(row => ({ ...row, committedAt: row.committed_at }));
+  } finally { db.close(); }
+}
+
+export function loadOrganizationCommitCursors(config, cwd = process.cwd()) {
+  if (!config.organizations?.length) return {};
+  const db = openHistory(cwd);
+  try {
+    const placeholders = config.organizations.map(() => '?').join(',');
+    return Object.fromEntries(db.prepare(`SELECT repository, MAX(committed_at) AS committed_at
+      FROM organization_commits WHERE hostname = ? AND organization IN (${placeholders}) GROUP BY repository`)
+      .all(config.hostname, ...config.organizations).map(row => [row.repository, row.committed_at]));
+  } finally { db.close(); }
+}
+
+export function clearStoredData(section, cwd = process.cwd()) {
+  const allowed = new Set(['snapshots', 'ci', 'commits', 'all']);
+  if (!allowed.has(section)) throw new Error('Unknown database section.');
+  const db = openHistory(cwd);
+  try {
+    db.exec('BEGIN');
+    if (section === 'snapshots' || section === 'all') db.exec('DELETE FROM snapshots');
+    if (section === 'ci' || section === 'all') db.exec('DELETE FROM ci_runs');
+    if (section === 'commits' || section === 'all') db.exec('DELETE FROM organization_commits');
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch {}
+    throw error;
   } finally { db.close(); }
 }
 // @ts-nocheck -- Node's experimental SQLite result types need a dedicated model layer.

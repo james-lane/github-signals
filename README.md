@@ -29,6 +29,7 @@ On first launch, press `l` to run the normal `gh auth login` web flow. If you al
 - `Enter` on Settings: enter settings; use `↑` / `↓` and `Enter` to edit a value
 - `←` / `→` while editing Theme: cycle themes with a live preview
 - `y` in Settings: copy the complete portable setup as JSON; cache and snapshot history are excluded
+- `x` in Settings: clear snapshots, CI runs, commit-ledger data, or all SQLite history after confirmation
 - `Esc`: return from a focused view to the main navigation
 - `↑` / `↓` in a table: select an engineer or repository
 - `←` / `→` in Repositories: select a metric column
@@ -53,7 +54,7 @@ Configuration, the last successful result, and historical snapshots are stored a
 
 GitHub Actions visibility is opt-in because it adds one bounded REST request per in-scope repository during refresh. Enable `CI visibility` in Settings or set `"ciEnabled": true`; it defaults to `false`.
 
-Set `"organization"` (for example, `"cinch-labs"`) or edit **Commit ledger org** in Settings to enable the Commits page. The ledger is independent of the configured repository list: it enumerates every accessible, non-archived repository in that organization and loads the latest 100 commits from each repository's default branch. Results are merged chronologically, paginated locally, and filterable by repository, author, or default branch (`main`, `master`, and so on). Loading happens only when the page is first entered, because organization-wide collection can require one GitHub request per repository. This is a diagnostic recent-change ledger rather than a complete archive of every feature-branch commit.
+Set `"organizations"` (for example, `["cinch-labs", "another-org"]`) or edit **Commit ledger orgs** in Settings to enable the Commits page. The ledger is independent of the configured repository list and combines every configured organization the current `gh` login can access. Normal refreshes enumerate those organizations, skip archived repositories and repositories whose `pushed_at` timestamp is outside the configured window, then incrementally collect default-branch commits with a five-minute overlap for safe deduplication. The window defaults to one day and can be set from 1–30 days. Commits are stored in the local SQLite database, so opening, filtering, and paging through 20-row pages is immediate and makes no GitHub requests. Press `r` when current incident data is needed. This is a default-branch investigation ledger rather than an archive of every feature-branch commit.
 
 Successful refreshes store aggregated engineer and repository metrics in SQLite. Cancelled or partially failed refreshes are not recorded, snapshots within 15 minutes are deduplicated, and data older than the configurable retention period (90 days by default) is pruned. History is matched to the active scope and thresholds before it is used for dashboard sparklines.
 

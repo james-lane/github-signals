@@ -1,6 +1,7 @@
 {
   "hostname": "github.com",
-  "organization": "octo-org",
+  "organizations": ["octo-org"],
+  "commitLedgerDays": 1,
   "theme": "default",
   "lookbackDays": 14,
   "showContributingRepositories": false,

@@ -8,7 +8,8 @@ test('uses defaults in a new workspace', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'signals-'));
     assert.deepEqual(await loadConfig(dir), defaults);
     assert.equal((await loadConfig(dir)).githubStatusEnabled, true);
-    assert.equal((await loadConfig(dir)).organization, '');
+    assert.deepEqual((await loadConfig(dir)).organizations, []);
+    assert.equal((await loadConfig(dir)).commitLedgerDays, 1);
 });
 test('merges persisted thresholds with defaults', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'signals-'));
@@ -30,12 +31,17 @@ test('CI visibility is opt-in', async () => {
     await saveConfig({ ...defaults, ciEnabled: 'yes' }, dir);
     assert.equal((await loadConfig(dir)).ciEnabled, false);
 });
-test('validates the optional organization used by the commit ledger', async () => {
+test('validates and deduplicates commit ledger organizations', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'signals-'));
-    await saveConfig({ ...defaults, organization: 'cinch-labs' }, dir);
-    assert.equal((await loadConfig(dir)).organization, 'cinch-labs');
-    await saveConfig({ ...defaults, organization: '../unsafe' }, dir);
-    assert.equal((await loadConfig(dir)).organization, '');
+    await saveConfig({ ...defaults, organizations: ['cinch-labs', 'octo-org', '../unsafe', 'cinch-labs'] }, dir);
+    assert.deepEqual((await loadConfig(dir)).organizations, ['cinch-labs', 'octo-org']);
+});
+test('bounds the commit ledger window to 1–30 days', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'signals-'));
+    await saveConfig({ ...defaults, commitLedgerDays: 7 }, dir);
+    assert.equal((await loadConfig(dir)).commitLedgerDays, 7);
+    await saveConfig({ ...defaults, commitLedgerDays: 31 }, dir);
+    assert.equal((await loadConfig(dir)).commitLedgerDays, 1);
 });
 test('GitHub status is enabled by default and can be disabled', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'signals-'));

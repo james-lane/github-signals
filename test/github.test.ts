@@ -20,6 +20,7 @@ test('normalizes an organization commit using its repository default branch', ()
     sha: 'abcdef123456', repository: 'acme/service', branch: 'main', author: 'octocat',
     committedAt: '2026-08-27T10:00:00Z', message: 'Fix production issue',
     url: 'https://github.com/acme/service/commit/abcdef123456',
+    organization: 'acme',
   });
 });
 

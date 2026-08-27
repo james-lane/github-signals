@@ -19,10 +19,12 @@ export declare function normalizeOrganizationCommit(item: any, repository: any):
     committedAt: any;
     message: string;
     url: any;
+    organization: any;
 };
-export declare function fetchOrganizationCommits(config: any, onProgress?: () => void, { signal }?: {}): Promise<{
+export declare function fetchOrganizationCommits(config: any, cursors?: {}, onProgress?: () => void, { signal }?: {}): Promise<{
     commits: any[];
     repositories: number;
+    activeRepositories: number;
     errors: any[];
 }>;
 export declare function fetchActionsSignals(config: any, onProgress?: () => void, { signal, progressOffset, progressTotal }?: {

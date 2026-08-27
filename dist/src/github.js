@@ -118,28 +118,42 @@ export function normalizeOrganizationCommit(item, repository) {
         committedAt: item?.commit?.committer?.date || item?.commit?.author?.date || '',
         message: String(item?.commit?.message || '').split('\n')[0],
         url: item?.html_url || `https://github.com/${repository.full_name}/commit/${item?.sha || ''}`,
+        organization: repository?.owner?.login || repository.full_name.split('/')[0],
     };
 }
-export async function fetchOrganizationCommits(config, onProgress = () => { }, { signal } = {}) {
-    if (!config.organization)
-        return { commits: [], repositories: 0, errors: [] };
+export async function fetchOrganizationCommits(config, cursors = {}, onProgress = () => { }, { signal } = {}) {
+    if (!config.organizations?.length)
+        return { commits: [], repositories: 0, activeRepositories: 0, errors: [] };
+    const windowStart = new Date(Date.now() - config.commitLedgerDays * 86400000).toISOString();
     const repositories = [];
-    for (let page = 1; page <= 10; page++) {
-        const batch = await api(config.hostname, `/orgs/${config.organization}/repos`, { type: 'all', sort: 'full_name', per_page: 100, page }, signal);
-        repositories.push(...batch.filter(repository => !repository.archived && repository.default_branch));
-        if (batch.length < 100)
-            break;
+    let discoveredRepositories = 0;
+    for (const organization of config.organizations) {
+        for (let page = 1; page <= 10; page++) {
+            const batch = await api(config.hostname, `/orgs/${organization}/repos`, { type: 'all', sort: 'full_name', per_page: 100, page }, signal);
+            discoveredRepositories += batch.length;
+            repositories.push(...batch.filter(repository => !repository.archived && repository.default_branch && repository.pushed_at >= windowStart));
+            if (batch.length < 100)
+                break;
+        }
     }
     const commits = [];
     const errors = [];
     const concurrency = 5;
     let completed = 0;
-    onProgress(`Loading commits from ${repositories.length} repositories…`, { current: 0, total: Math.max(1, repositories.length) });
+    onProgress(`Checking ${repositories.length} recently pushed repositories…`, { current: 0, total: Math.max(1, repositories.length) });
     for (let offset = 0; offset < repositories.length; offset += concurrency) {
         await Promise.all(repositories.slice(offset, offset + concurrency).map(async (repository) => {
             try {
-                const items = await api(config.hostname, `/repos/${repository.full_name}/commits`, { sha: repository.default_branch, per_page: 100 }, signal);
-                commits.push(...items.map(item => normalizeOrganizationCommit(item, repository)));
+                const cursor = cursors[repository.full_name];
+                const since = cursor
+                    ? new Date(Math.max(new Date(windowStart).getTime(), new Date(cursor).getTime() - 5 * 60_000)).toISOString()
+                    : windowStart;
+                for (let page = 1; page <= 10; page++) {
+                    const items = await api(config.hostname, `/repos/${repository.full_name}/commits`, { sha: repository.default_branch, since, per_page: 100, page }, signal);
+                    commits.push(...items.map(item => normalizeOrganizationCommit(item, repository)));
+                    if (items.length < 100)
+                        break;
+                }
             }
             catch (error) {
                 if (signal?.aborted)
@@ -148,12 +162,12 @@ export async function fetchOrganizationCommits(config, onProgress = () => { }, {
             }
             finally {
                 completed += 1;
-                onProgress(`Loading organization commits (${completed}/${repositories.length})…`, { current: completed, total: Math.max(1, repositories.length) });
+                onProgress(`Organization commits (${completed}/${repositories.length})…`, { current: completed, total: Math.max(1, repositories.length) });
             }
         }));
     }
     commits.sort((left, right) => String(right.committedAt).localeCompare(String(left.committedAt)));
-    return { commits, repositories: repositories.length, errors };
+    return { commits, repositories: discoveredRepositories, activeRepositories: repositories.length, errors };
 }
 const durationMs = (start, end) => start && end ? Math.max(0, new Date(end).getTime() - new Date(start).getTime()) : null;
 export async function fetchActionsSignals(config, onProgress = () => { }, { signal, progressOffset = 0, progressTotal } = {}) {

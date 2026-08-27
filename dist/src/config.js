@@ -5,7 +5,8 @@ export const CONFIG_FILE = '.github-signals.json';
 export const CACHE_FILE = '.github-signals-cache.json';
 export const defaults = {
     hostname: 'github.com',
-    organization: '',
+    organizations: [],
+    commitLedgerDays: 1,
     lookbackDays: 14,
     theme: 'default',
     showContributingRepositories: false,
@@ -63,7 +64,9 @@ export function validateConfig(parsed = {}) {
     return {
         ...defaults,
         hostname: validHostname(parsed.hostname),
-        organization: validOrganization(parsed.organization),
+        organizations: [...new Set((Array.isArray(parsed.organizations) ? parsed.organizations : [])
+                .map(validOrganization).filter(Boolean))],
+        commitLedgerDays: boundedInteger(parsed.commitLedgerDays, defaults.commitLedgerDays, 1, 30),
         lookbackDays: boundedInteger(parsed.lookbackDays, defaults.lookbackDays, 1, 365),
         historyRetentionDays: boundedInteger(parsed.historyRetentionDays, defaults.historyRetentionDays, 1, 3650),
         showContributingRepositories: parsed.showContributingRepositories === true,

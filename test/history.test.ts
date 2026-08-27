@@ -4,7 +4,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { defaults } from '../src/config.js';
-import { loadCiRuns, loadEngineerFocusHistory, loadHistory, recordCiRuns, recordSnapshot, scopeFingerprint } from '../src/history.js';
+import { clearStoredData, loadCiRuns, loadEngineerFocusHistory, loadHistory, loadOrganizationCommitCursors, loadOrganizationCommits, recordCiRuns, recordOrganizationCommits, recordSnapshot, scopeFingerprint } from '../src/history.js';
 
 const config = {
   ...defaults,
@@ -59,4 +59,18 @@ test('stores and updates GitHub Actions runs without duplicates', async () => {
   assert.equal(runs[0].conclusion, 'failure');
   assert.equal(runs[0].workflowPath, '.github/workflows/ci.yml');
   assert.deepEqual(runs[0].pullRequests, [12]);
+});
+
+test('stores, deduplicates, and selectively clears organization commits', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'github-signals-'));
+  const ledgerConfig = { ...config, organizations: ['org'], commitLedgerDays: 1 };
+  const commit = {
+    organization: 'org', repository: 'org/core', sha: 'abc123', branch: 'main', author: 'octocat',
+    committedAt: new Date().toISOString(), message: 'Restore service', url: 'https://github.com/org/core/commit/abc123',
+  };
+  await recordOrganizationCommits(ledgerConfig, [commit, commit], dir);
+  assert.equal(loadOrganizationCommits(ledgerConfig, dir).length, 1);
+  assert.equal(loadOrganizationCommitCursors(ledgerConfig, dir)['org/core'], commit.committedAt);
+  clearStoredData('commits', dir);
+  assert.equal(loadOrganizationCommits(ledgerConfig, dir).length, 0);
 });

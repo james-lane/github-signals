@@ -28,4 +28,10 @@ export declare function loadCiRuns(config: any, limitPerRepository?: number, cwd
     url: import("node:sqlite").SQLOutputValue;
     pullRequests: any;
 }[];
+export declare function recordOrganizationCommits(config: any, commits: any, cwd?: string): Promise<any>;
+export declare function loadOrganizationCommits(config: any, cwd?: string): {
+    committedAt: import("node:sqlite").SQLOutputValue;
+}[];
+export declare function loadOrganizationCommitCursors(config: any, cwd?: string): any;
+export declare function clearStoredData(section: any, cwd?: string): void;
 //# sourceMappingURL=history.d.ts.map

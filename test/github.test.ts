@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { engineerSignalsFromRepositories, isRenovateAuthor, normalizeOrganizationCommit } from '../src/github.js';
+import { isRenovateAuthor } from '../src/domain/renovate.js';
+import { normalizeOrganizationCommit } from '../src/infrastructure/github/commits.js';
+import { engineerSignalsFromRepositories } from '../src/infrastructure/github/signals.js';
 
 test('recognizes Renovate pull request authors without hiding approval bots', () => {
   assert.equal(isRenovateAuthor('renovate'), true);

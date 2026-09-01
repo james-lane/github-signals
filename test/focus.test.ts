@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { aggregateEngineerFocus, focusScore } from '../src/focus.js';
+import { aggregateEngineerFocus, focusScore } from '../src/domain/focus.js';
 
 test('aggregates team focus by repository and ignores failed engineers', () => {
   const result = aggregateEngineerFocus([

@@ -1,18 +1,27 @@
 {
   "name": "github-signals",
-  "version": "0.1.16",
+  "version": "0.2.0",
   "private": true,
   "description": "A terminal dashboard for GitHub team activity and repository health",
   "type": "module",
   "bin": {
     "github-signals": "./dist/src/cli.js"
   },
+  "files": [
+    ".github-signals.example.json",
+    "AGENTS.md",
+    "dist/src/**/*.js",
+    "docs/ARCHITECTURE.md"
+  ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "clean": "node scripts/clean-build.js",
+    "build": "npm run clean && tsc -p tsconfig.json",
     "start": "node dist/src/cli.js",
     "test": "node --test 'dist/test/*.test.js'",
     "check": "npm run build && npm test",
-    "hooks:install": "git config core.hooksPath .githooks"
+    "hooks:install": "git config core.hooksPath .githooks",
+    "package:release": "npm run check && node scripts/package-release.js",
+    "verify:release-tag": "node scripts/verify-release-tag.js"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

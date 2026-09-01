@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseGitHubStatus } from '../src/github-status.js';
+import { parseGitHubStatus } from '../src/infrastructure/github/status.js';
 
 test('parses supported GitHub Status responses', () => {
   const status = parseGitHubStatus({ status: { indicator: 'minor', description: 'Minor Service Outage' } });

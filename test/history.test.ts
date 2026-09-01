@@ -3,10 +3,23 @@ import assert from 'node:assert/strict';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { defaults } from '../src/config.js';
-import { clearStoredData, loadCiRuns, loadEngineerFocusHistory, loadHistory, loadOrganizationCommitCursors, loadOrganizationCommits, recordCiRuns, recordOrganizationCommits, recordSnapshot, scopeFingerprint } from '../src/history.js';
+import { defaults } from '../src/domain/configuration.js';
+import type { AppConfig } from '../src/domain/models.js';
+import { loadCiRuns, recordCiRuns } from '../src/infrastructure/storage/ci-run-store.js';
+import {
+  loadOrganizationCommitCursors,
+  loadOrganizationCommits,
+  recordOrganizationCommits,
+} from '../src/infrastructure/storage/commit-store.js';
+import { clearStoredData } from '../src/infrastructure/storage/history-database.js';
+import {
+  loadEngineerFocusHistory,
+  loadHistory,
+  recordSnapshot,
+  scopeFingerprint,
+} from '../src/infrastructure/storage/snapshot-store.js';
 
-const config = {
+const config: AppConfig = {
   ...defaults,
   engineers: [{ id: 'octocat', name: 'Mona' }],
   repositories: [{ name: 'org/core', priority: 'owned' }],
@@ -34,7 +47,10 @@ test('stores complete aggregate snapshots and deduplicates close refreshes', asy
 });
 
 test('scope fingerprint changes with visible repository scope', () => {
-  const withContribution = { ...config, repositories: [...config.repositories, { name: 'org/shared', priority: 'contributing' }] };
+  const withContribution: AppConfig = {
+    ...config,
+    repositories: [...config.repositories, { name: 'org/shared', priority: 'contributing' }],
+  };
   assert.notEqual(scopeFingerprint(withContribution), scopeFingerprint({ ...withContribution, showContributingRepositories: true }));
 });
 

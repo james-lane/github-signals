@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitizeTerminal } from '../src/terminal.js';
+import { sanitizeTerminal } from '../src/presentation/terminal/sanitize.js';
 
 test('terminal sanitizer removes control and OSC sequences but preserves app colors', () => {
   assert.equal(sanitizeTerminal('repo\u001b]52;c;clipboard\u0007\u001b[2J'), 'repo');

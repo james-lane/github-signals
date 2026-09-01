@@ -1,8 +1,18 @@
+# Build and package output.
+dist/
+release/
+
+# Dependencies.
+node_modules/
+
+# Local development indexes.
+.codegraph/
+
 # Local GitHub Signals data. These files can contain private repository names,
 # engineer identities, and cached enterprise activity; never commit them.
-.github-signals.json
 .github-signals-cache.json
 .github-signals-history.sqlite*
+.github-signals.json
 
-node_modules/
+# Operating-system metadata.
 .DS_Store

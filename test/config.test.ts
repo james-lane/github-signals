@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { chmod, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { defaults, loadConfig, saveConfig, serializeConfig, THEMES } from '../src/config.js';
+import { defaults, serializeConfig, THEMES } from '../src/domain/configuration.js';
+import { loadConfig, saveConfig } from '../src/infrastructure/config/config-store.js';
 
 test('uses defaults in a new workspace', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'signals-'));
@@ -106,7 +107,7 @@ test('enforces private permissions on existing config and cache files', async ()
   await writeFile(configFile, '{}'); await chmod(configFile, 0o644);
   await writeFile(cacheFile, '{}'); await chmod(cacheFile, 0o644);
   await saveConfig({ ...defaults }, dir);
-  const { saveCache } = await import('../src/config.js');
+  const { saveCache } = await import('../src/infrastructure/config/config-store.js');
   await saveCache({}, dir);
   assert.equal((await stat(configFile)).mode & 0o777, 0o600);
   assert.equal((await stat(cacheFile)).mode & 0o777, 0o600);

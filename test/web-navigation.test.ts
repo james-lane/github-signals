@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ciContextWebUrl, workflowWebUrl } from '../src/web-navigation.js';
+import { ciContextWebUrl, workflowWebUrl } from '../src/infrastructure/github/web-urls.js';
 
 const group = {
   repository: 'octo-org/core',

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { APP_VERSION } from '../src/version.js';
+import { APP_VERSION } from '../src/infrastructure/runtime/version.js';
 
 test('uses package.json as the application version', async () => {
   const packageJson = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8'));

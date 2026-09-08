@@ -1,4 +1,4 @@
-import { filterVisiblePullRequests, groupCiWorkflows } from '../domain/dashboard-selectors.js';
+import { filterVisiblePullRequests, visibleCiWorkflowGroups } from '../domain/dashboard-selectors.js';
 import { currentCommitPage, COMMIT_PAGE_SIZE } from '../presentation/screens/commits-screen.js';
 import { SETTINGS_COUNT } from '../presentation/screens/settings-screen.js';
 import type { DashboardState } from './dashboard-state.js';
@@ -16,6 +16,7 @@ export interface KeyboardTarget extends DashboardState {
   openCommitOnWeb(): Promise<void>;
   openCurrentOnWeb(): Promise<void>;
   filterCommitLedger(): Promise<void>;
+  filterCiWorkflows(): Promise<void>;
   copySettings(): Promise<void>;
   clearDatabaseSection(): Promise<void>;
   cycleTheme(delta: number): Promise<void>;
@@ -93,6 +94,10 @@ export class KeyboardRouter {
     }
     if (key === 'f' && this.target.currentView() === 'Commits' && this.target.contentFocused && this.target.commitLedger.loaded) {
       await this.target.runAction(() => this.target.filterCommitLedger());
+      return true;
+    }
+    if (key === 'f' && this.target.currentView() === 'CI' && this.target.contentFocused && !this.target.ciView) {
+      await this.target.runAction(() => this.target.filterCiWorkflows());
       return true;
     }
     if (key === 'y' && this.target.currentView() === 'Settings' && !this.target.themeEditing) {
@@ -210,7 +215,7 @@ export class KeyboardRouter {
       case 'Engineers': return Boolean(this.target.config.engineers.length);
       case 'Repositories': return Boolean(this.target.config.repositories.length);
       case 'Commits': return true;
-      case 'CI': return Boolean(groupCiWorkflows(this.target.ciRuns).length);
+      case 'CI': return Boolean(visibleCiWorkflowGroups(this.target.ciRuns, this.target.ciWorkflowFilter).length);
       case 'Settings': return true;
       case 'History': return Boolean(this.target.history.length);
       default: return false;

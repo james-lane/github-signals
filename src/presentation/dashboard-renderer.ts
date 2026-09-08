@@ -116,7 +116,7 @@ export class DashboardRenderer {
     switch (state.currentView()) {
       case 'Repositories': return '↑/↓ repo  ←/→ metric  Enter open  Esc nav';
       case 'Commits': return '↑/↓ commit  ←/→ page  f repo focus  Enter/w web  Esc nav';
-      case 'CI': return '↑/↓ workflow  Enter runs  w web  Esc nav';
+      case 'CI': return `↑/↓ workflow  Enter runs  f ${state.ciWorkflowFilter ? 'clear filter' : 'filter'}  w web  Esc nav`;
       case 'History': return '↑/↓ snapshot  Esc nav';
       case 'Settings': return state.themeEditing
         ? '←/→ preview theme  Enter apply  Esc setting'

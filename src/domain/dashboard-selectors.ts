@@ -97,6 +97,13 @@ export function groupCiWorkflows(runs: readonly CiRun[]): WorkflowGroup[] {
     || (right.latest?.createdAt ?? '').localeCompare(left.latest?.createdAt ?? ''));
 }
 
+export function visibleCiWorkflowGroups(runs: readonly CiRun[], textFilter: string): WorkflowGroup[] {
+  const normalizedFilter = textFilter.trim().toLocaleLowerCase();
+  const groups = groupCiWorkflows(runs);
+  if (!normalizedFilter) return groups;
+  return groups.filter(group => `${group.repository} · ${group.workflow}`.toLocaleLowerCase().includes(normalizedFilter));
+}
+
 export function sortVisibleRepositories(config: AppConfig): RepositoryConfig[] {
   return [...visibleRepositories(config)].sort((left, right) => {
     if (left.priority !== right.priority) return left.priority === 'owned' ? -1 : 1;

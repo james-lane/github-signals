@@ -1,8 +1,8 @@
 import { engineerId, repositoryName } from '../domain/configuration.js';
 import {
   filterVisiblePullRequests,
-  groupCiWorkflows,
   sortVisibleRepositories,
+  visibleCiWorkflowGroups,
 } from '../domain/dashboard-selectors.js';
 import { fetchWorkflowPath, fetchWorkflowRunJobs } from '../infrastructure/github/actions.js';
 import {
@@ -30,7 +30,7 @@ export class NavigationActions {
   public async openCiSelected(): Promise<void> {
     const target = this.target;
     if (!target.ciView) {
-      const group = groupCiWorkflows(target.ciRuns)[target.ciSelection];
+      const group = visibleCiWorkflowGroups(target.ciRuns, target.ciWorkflowFilter)[target.ciSelection];
       if (group) target.ciView = { type: 'workflow', group, selection: 0 };
       target.render();
       return;
@@ -66,7 +66,7 @@ export class NavigationActions {
       return;
     }
     if (target.currentView() !== 'CI') return;
-    const group = target.ciView?.group ?? groupCiWorkflows(target.ciRuns)[target.ciSelection];
+    const group = target.ciView?.group ?? visibleCiWorkflowGroups(target.ciRuns, target.ciWorkflowFilter)[target.ciSelection];
     if (!group) return;
     if (!target.ciView && !group.latest?.workflowPath && group.latest?.workflowId) {
       target.message = target.accent(`Resolving ${group.workflow} workflow file…`);

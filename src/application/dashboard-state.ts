@@ -69,6 +69,7 @@ export interface DashboardState {
   ciRuns: CiRun[];
   ciErrors: CiRun[];
   ciSelection: number;
+  ciWorkflowFilter: string;
   ciView: CiView | null;
   showRenovatePullRequests: boolean;
   githubStatus: GitHubStatus | null;

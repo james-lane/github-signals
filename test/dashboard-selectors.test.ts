@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateCiMetrics, groupCiWorkflows, paginateCommits } from '../src/domain/dashboard-selectors.js';
+import { calculateCiMetrics, groupCiWorkflows, paginateCommits, visibleCiWorkflowGroups } from '../src/domain/dashboard-selectors.js';
 import type { CiRun, OrganizationCommit } from '../src/domain/models.js';
 
 const runs: CiRun[] = [
@@ -40,6 +40,13 @@ test('groups workflows by repository and workflow identity', () => {
   assert.equal(groups[0].failures, 1);
   assert.equal(groups[0].latest?.id, 2);
   assert.equal(groups[1].workflow, 'Deploy');
+});
+
+test('filters workflows case-insensitively across repository and workflow names', () => {
+  assert.deepEqual(visibleCiWorkflowGroups(runs, 'dEpLoY').map(group => group.workflow), ['Deploy']);
+  assert.deepEqual(visibleCiWorkflowGroups(runs, 'ORG/CORE').map(group => group.workflow), ['CI']);
+  assert.equal(visibleCiWorkflowGroups(runs, 'missing').length, 0);
+  assert.equal(visibleCiWorkflowGroups(runs, '  ').length, 2);
 });
 
 test('clamps commit pagination after a result set shrinks', () => {

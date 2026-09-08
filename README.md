@@ -52,6 +52,7 @@ Replace `VERSION` with the downloaded release version. The same Node.js and GitH
 - `Enter` in a table: open the selected profile, repository, or filtered metric page
 - `Enter` on a repository's Open PRs metric: inspect its pull requests in the terminal; use `↑` / `↓`, `Enter` to open on the web, and `Esc` to return
 - `Enter` in CI: drill from workflow metrics into recent runs, then into job and step timing; `Esc` moves back one level
+- `f` in the CI workflow list: enter a case-insensitive text filter; press `f` again to clear it
 - `w` in CI or the pull-request drill-down: open the selected workflow, run, job, or pull request on GitHub
 - `f` in Commits: fetch and focus on the highlighted repository's latest 20 default-branch commits; press `f` again to return to the organization ledger
 - `←` / `→` in Commits: move through ledger pages; `Enter` or `w` opens the selected commit on GitHub

@@ -6,7 +6,7 @@ import { serializeConfig } from '../domain/configuration.js';
 import { clearStoredData } from '../infrastructure/storage/history-database.js';
 import { copyToClipboard } from '../infrastructure/system/clipboard.js';
 import { fetchGitHubStatus } from '../infrastructure/github/status.js';
-import { filterVisiblePullRequests, groupCiWorkflows, sortVisibleRepositories } from '../domain/dashboard-selectors.js';
+import { filterVisiblePullRequests, sortVisibleRepositories, visibleCiWorkflowGroups } from '../domain/dashboard-selectors.js';
 import type {
   AppConfig,
   AuthState,
@@ -70,6 +70,7 @@ export class GitHubSignalsApp implements DashboardState {
   public ciRuns: CiRun[];
   public ciErrors: CiRun[];
   public ciSelection = 0;
+  public ciWorkflowFilter = '';
   public ciView: CiView | null = null;
   public showRenovatePullRequests = true;
   public githubStatus: GitHubStatus | null = null;
@@ -162,7 +163,7 @@ export class GitHubSignalsApp implements DashboardState {
     this.selection[1] = Math.min(this.selection[1] ?? 0, Math.max(0, this.config.engineers.length - 1));
     this.selection[2] = Math.min(this.selection[2] ?? 0, Math.max(0, sortVisibleRepositories(this.config).length - 1));
     this.historySelection = Math.min(this.historySelection, Math.max(0, this.history.length - 1));
-    this.ciSelection = Math.min(this.ciSelection, Math.max(0, groupCiWorkflows(this.ciRuns).length - 1));
+    this.ciSelection = Math.min(this.ciSelection, Math.max(0, visibleCiWorkflowGroups(this.ciRuns, this.ciWorkflowFilter).length - 1));
     if (this.prView) {
       const pullRequests = filterVisiblePullRequests(this.prView.pullRequests, this.showRenovatePullRequests);
       this.prView.selection = Math.min(this.prView.selection, Math.max(0, pullRequests.length - 1));
@@ -191,7 +192,7 @@ export class GitHubSignalsApp implements DashboardState {
 
   public moveCiSelection(delta: number): void {
     if (!this.ciView) {
-      const groups = groupCiWorkflows(this.ciRuns);
+      const groups = visibleCiWorkflowGroups(this.ciRuns, this.ciWorkflowFilter);
       if (groups.length) this.ciSelection = Math.max(0, Math.min(groups.length - 1, this.ciSelection + delta));
       return;
     }
@@ -213,6 +214,26 @@ export class GitHubSignalsApp implements DashboardState {
 
   public async filterCommitLedger(): Promise<void> {
     await this.navigation.filterCommitLedger();
+  }
+
+  public async filterCiWorkflows(): Promise<void> {
+    if (this.ciWorkflowFilter) {
+      this.ciWorkflowFilter = '';
+      this.ciSelection = 0;
+      this.message = this.success('CI workflow filter cleared.');
+      this.render();
+      return;
+    }
+    const filter = await this.prompt('Filter workflows (case-insensitive)');
+    if (!filter) {
+      this.message = this.warning('CI workflow filter unchanged.');
+      this.render();
+      return;
+    }
+    this.ciWorkflowFilter = filter;
+    this.ciSelection = 0;
+    this.message = this.success(`Showing workflows matching “${filter}”. Press f to clear.`);
+    this.render();
   }
 
   public async openCommitOnWeb(): Promise<void> {

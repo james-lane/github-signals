@@ -1,5 +1,5 @@
 import type { DashboardState } from '../../application/dashboard-state.js';
-import { groupCiWorkflows } from '../../domain/dashboard-selectors.js';
+import { visibleCiWorkflowGroups } from '../../domain/dashboard-selectors.js';
 import type { CiRun } from '../../domain/models.js';
 import { formatDuration, tableCell } from '../terminal/format.js';
 import type { TerminalCanvas } from '../terminal/canvas.js';
@@ -17,24 +17,27 @@ export function renderCiScreen(canvas: TerminalCanvas, state: DashboardState): v
 }
 
 function renderWorkflowOverview(canvas: TerminalCanvas, state: DashboardState): void {
-  const groups = groupCiWorkflows(state.ciRuns);
+  const groups = visibleCiWorkflowGroups(state.ciRuns, state.ciWorkflowFilter);
   const { theme } = canvas;
   canvas.line(theme.bold('CI workflows'));
   const visibleRows = Math.max(5, canvas.height - 12);
   const start = Math.max(0, Math.min(state.ciSelection - Math.floor(visibleRows / 2), groups.length - visibleRows));
   const end = Math.min(groups.length, start + visibleRows);
   const range = groups.length ? `${start + 1}–${end} of ${groups.length}` : '0';
-  canvas.line(theme.muted(`GitHub Actions · ${state.ciRuns.length} stored runs · workflows ${range} · ${state.config.historyRetentionDays}-day retention`));
+  const filter = state.ciWorkflowFilter ? ` · filter “${state.ciWorkflowFilter}” · f clears` : '';
+  canvas.line(theme.muted(`GitHub Actions · ${state.ciRuns.length} stored runs · workflows ${range} · ${state.config.historyRetentionDays}-day retention${filter}`));
   if (state.ciErrors.length) canvas.line(theme.warning(`${state.ciErrors.length} repositories could not return Actions data during the last refresh.`));
   canvas.line();
   if (!groups.length) {
-    canvas.line(theme.muted('No Actions history yet. Press r to refresh GitHub signals.'));
+    canvas.line(theme.muted(state.ciWorkflowFilter
+      ? `No workflows match “${state.ciWorkflowFilter}”. Press f to clear the filter.`
+      : 'No Actions history yet. Press r to refresh GitHub signals.'));
     return;
   }
 
-  const fixedWidth = 52;
+  const fixedWidth = 73;
   const nameWidth = Math.max(24, canvas.width - fixedWidth);
-  canvas.line(theme.muted(`${tableCell('Workflow', nameWidth)} ${tableCell('Runs', 6)} ${tableCell('Success', 8)} ${tableCell('p50', 7)} ${tableCell('p95', 7)} ${tableCell('Queue', 7)} Last`));
+  canvas.line(theme.muted(`${tableCell('Workflow', nameWidth)} ${tableCell('Runs', 6)} ${tableCell('Success', 8)} ${tableCell('p50', 7)} ${tableCell('p95', 7)} ${tableCell('Queue', 7)} ${tableCell('Last run', 20)} Result`));
   groups.slice(start, end).forEach((group, visibleIndex) => {
     const index = start + visibleIndex;
     const selected = state.contentFocused && index === state.ciSelection;
@@ -45,7 +48,8 @@ function renderWorkflowOverview(canvas: TerminalCanvas, state: DashboardState): 
         ? theme.success('passed')
         : theme.error(latest.conclusion ?? 'unknown');
     const label = `${selected ? '›' : ' '} ${group.repository} · ${group.workflow}`;
-    const row = `${tableCell(label, nameWidth)} ${tableCell(group.completed, 6)} ${tableCell(group.successRate == null ? '—' : `${Math.round(group.successRate * 100)}%`, 8)} ${tableCell(formatDuration(group.p50), 7)} ${tableCell(formatDuration(group.p95), 7)} ${tableCell(formatDuration(group.queue), 7)} ${latestState}`;
+    const lastRun = latest?.createdAt ? new Date(latest.createdAt).toLocaleString() : 'unknown';
+    const row = `${tableCell(label, nameWidth)} ${tableCell(group.completed, 6)} ${tableCell(group.successRate == null ? '—' : `${Math.round(group.successRate * 100)}%`, 8)} ${tableCell(formatDuration(group.p50), 7)} ${tableCell(formatDuration(group.p95), 7)} ${tableCell(formatDuration(group.queue), 7)} ${tableCell(lastRun, 20)} ${latestState}`;
     canvas.line(selected ? theme.selectedRow(row) : row);
   });
 }
